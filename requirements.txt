@@ -1,0 +1,15 @@
+google-generativeai
+langchain
+langchain-community
+langchain-google-genai
+faiss-cpu
+torch
+fastapi
+uvicorn
+python-dotenv
+unstructured
+pdfplumber
+paddleocr
+paddlepaddle
+docx2txt
+python-multipart
