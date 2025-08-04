@@ -23,6 +23,7 @@ from typing import Dict, List
 from fastapi import HTTPException
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
+import shutil
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -257,3 +258,141 @@ def add_to_embedding(file_path: str, metadata: AddVectorRequest):
     except Exception as e:
         logger.error(f"Error processing FAISS index: {str(e)}")
         raise
+
+def delete_metadata(doc_id: str) -> bool:
+    """Xóa metadata từ MongoDB và metadata.json fallback."""
+    success = False
+    
+    # Thử xóa từ MongoDB trước
+    try:
+        client = MongoClient(Config.DATABASE_URL)
+        db = client["faiss_db"]
+        collection = db["metadata"]
+        
+        result = collection.delete_one({"_id": doc_id})
+        if result.deleted_count > 0:
+            logger.info(f"Successfully deleted metadata from MongoDB for _id: {doc_id}")
+            success = True
+        else:
+            logger.warning(f"No document found in MongoDB with _id: {doc_id}")
+        client.close()
+    except PyMongoError as e:
+        logger.error(f"Failed to delete metadata from MongoDB: {str(e)}")
+    
+    # Fallback: Xóa từ tất cả các file metadata.json
+    if not success:
+        base_path = Config.DATA_PATH if hasattr(Config, 'DATA_PATH') else "data"
+        metadata_paths = [
+            f"{base_path}/Public_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Student_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Teacher_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Admin_Rag_Info/Faiss_Folder/metadata.json"
+        ]
+        
+        for metadata_file in metadata_paths:
+            try:
+                if os.path.exists(metadata_file):
+                    with open(metadata_file, 'r', encoding='utf-8') as f:
+                        metadata_list = json.load(f)
+                    
+                    # Tìm và xóa metadata
+                    original_length = len(metadata_list)
+                    metadata_list = [item for item in metadata_list if item.get('_id') != doc_id]
+                    
+                    if len(metadata_list) < original_length:
+                        with open(metadata_file, 'w', encoding='utf-8') as f:
+                            json.dump(metadata_list, f, ensure_ascii=False, indent=2)
+                        logger.info(f"Successfully deleted metadata from {metadata_file}")
+                        success = True
+            except Exception as e:
+                logger.error(f"Error deleting from {metadata_file}: {str(e)}")
+    
+    return success
+
+def find_document_info(doc_id: str) -> dict:
+    """Tìm thông tin document để xác định đường dẫn file và vector DB."""
+    # Thử tìm từ MongoDB trước
+    try:
+        client = MongoClient(Config.DATABASE_URL)
+        db = client["faiss_db"]
+        collection = db["metadata"]
+        
+        doc_info = collection.find_one({"_id": doc_id})
+        client.close()
+        
+        if doc_info:
+            return doc_info
+    except PyMongoError as e:
+        logger.error(f"Failed to find document in MongoDB: {str(e)}")
+    
+    # Fallback: Tìm từ metadata.json files
+    base_path = Config.DATA_PATH if hasattr(Config, 'DATA_PATH') else "data"
+    metadata_paths = [
+        f"{base_path}/Public_Rag_Info/Faiss_Folder/metadata.json",
+        f"{base_path}/Student_Rag_Info/Faiss_Folder/metadata.json", 
+        f"{base_path}/Teacher_Rag_Info/Faiss_Folder/metadata.json",
+        f"{base_path}/Admin_Rag_Info/Faiss_Folder/metadata.json"
+    ]
+    
+    for metadata_file in metadata_paths:
+        try:
+            if os.path.exists(metadata_file):
+                with open(metadata_file, 'r', encoding='utf-8') as f:
+                    metadata_list = json.load(f)
+                
+                for item in metadata_list:
+                    if item.get('_id') == doc_id:
+                        return item
+        except Exception as e:
+            logger.error(f"Error reading {metadata_file}: {str(e)}")
+    
+    return None
+
+def delete_from_faiss_index(vector_db_path: str, doc_id: str) -> bool:
+    """
+    Xóa tài liệu khỏi chỉ mục FAISS dựa trên doc_id.
+    
+    Args:
+        vector_db_path (str): Đường dẫn đến thư mục chứa chỉ mục FAISS.
+        doc_id (str): ID của tài liệu cần xóa (tương ứng với metadata._id).
+    
+    Returns:
+        bool: True nếu xóa thành công hoặc không tìm thấy chỉ mục/tài liệu, False nếu có lỗi.
+    """
+    try:
+        # Kiểm tra sự tồn tại của chỉ mục FAISS
+        index_path = f"{vector_db_path}/index.faiss"
+        pkl_path = f"{vector_db_path}/index.pkl"
+        
+        if not (os.path.exists(index_path) and os.path.exists(pkl_path)):
+            logger.warning(f"Không tìm thấy chỉ mục FAISS tại {vector_db_path}")
+            return True  # Không có chỉ mục thì coi như đã xóa thành công
+        
+        # Tải chỉ mục FAISS
+        embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
+        
+        # Lấy tất cả docstore_id và kiểm tra metadata._id
+        docstore = db.docstore
+        index_to_docstore_id = db.index_to_docstore_id
+        ids_to_delete = []
+        
+        # Tìm docstore_id tương ứng với doc_id trong metadata
+        for index, docstore_id in index_to_docstore_id.items():
+            doc = docstore.search(docstore_id)
+            if doc and doc.metadata.get('_id') == doc_id:
+                ids_to_delete.append(docstore_id)
+        
+        # Xóa tài liệu nếu tìm thấy
+        if ids_to_delete:
+            db.delete(ids=ids_to_delete)
+            db.save_local(vector_db_path)
+            logger.info(f"Đã xóa thành công {len(ids_to_delete)} tài liệu với _id: {doc_id} khỏi chỉ mục FAISS tại {vector_db_path}")
+        else:
+            logger.warning(f"Không tìm thấy tài liệu nào với _id: {doc_id} trong chỉ mục FAISS")
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"Lỗi khi xóa khỏi chỉ mục FAISS: {str(e)}")
+        return False

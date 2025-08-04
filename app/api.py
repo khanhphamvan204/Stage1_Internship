@@ -7,9 +7,11 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from app.embedding import add_to_embedding, save_metadata, AddVectorRequest, get_file_paths
+from app.embedding import add_to_embedding, delete_from_faiss_index, delete_metadata, find_document_info, save_metadata, AddVectorRequest, get_file_paths
 from app.config import Config
 import shutil
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -184,7 +186,173 @@ async def get_file_types():
             }
         ]
     }
+@app.delete("/documents/vector/{doc_id}")
+async def delete_vector_document(doc_id: str):
+    """
+    API endpoint để xóa tài liệu, bao gồm file, vector DB và metadata.
+    
+    Args:
+        doc_id: ID của document cần xóa
+    """
+    try:
+        logger.info(f"Deleting document with ID: {doc_id}")
+        
+        # Tìm thông tin document
+        doc_info = find_document_info(doc_id)
+        if not doc_info:
+            logger.error(f"Document not found: {doc_id}")
+            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
+        
+        file_type = doc_info.get('file_type')
+        filename = doc_info.get('filename')
+        file_path = doc_info.get('url')
+        
+        if not all([file_type, filename]):
+            logger.error(f"Incomplete document information for ID: {doc_id}")
+            raise HTTPException(status_code=400, detail="Incomplete document information")
+        
+        # Lấy đường dẫn vector database
+        try:
+            _, vector_db_path = get_file_paths(file_type, filename)
+        except ValueError as e:
+            logger.error(f"Error getting file paths: {str(e)}")
+            raise HTTPException(status_code=400, detail=str(e))
+        
+        deletion_results = {
+            "file_deleted": False,
+            "metadata_deleted": False,
+            "vector_deleted": False
+        }
+        
+        # 1. Xóa file vật lý
+        try:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                deletion_results["file_deleted"] = True
+                logger.info(f"Successfully deleted file: {file_path}")
+            else:
+                logger.warning(f"File not found: {file_path}")
+                deletion_results["file_deleted"] = True  # Coi như đã xóa nếu không tồn tại
+        except Exception as e:
+            logger.error(f"Error deleting file {file_path}: {str(e)}")
+        
+        # 2. Xóa từ FAISS vector database
+        try:
+            deletion_results["vector_deleted"] = delete_from_faiss_index(vector_db_path, doc_id)
+        except Exception as e:
+            logger.error(f"Error deleting from vector database: {str(e)}")
+        
+        # 3. Xóa metadata
+        try:
+            deletion_results["metadata_deleted"] = delete_metadata(doc_id)
+        except Exception as e:
+            logger.error(f"Error deleting metadata: {str(e)}")
+        
+        # Kiểm tra kết quả
+        if all(deletion_results.values()):
+            logger.info(f"Successfully deleted document: {doc_id}")
+            return {
+                "message": "Document deleted successfully",
+                "_id": doc_id,
+                "file_type": file_type,
+                "filename": filename,
+                "deletion_results": deletion_results
+            }
+        else:
+            logger.warning(f"Partial deletion for document: {doc_id}, results: {deletion_results}")
+            return {
+                "message": "Document partially deleted",
+                "_id": doc_id,
+                "file_type": file_type,
+                "filename": filename,
+                "deletion_results": deletion_results,
+                "warning": "Some components could not be deleted"
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error deleting document {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
 
+@app.get("/documents/list")
+async def list_documents(file_type: str = None, limit: int = 100, skip: int = 0):
+    """
+    API endpoint để lấy danh sách tài liệu.
+    
+    Args:
+        file_type: Lọc theo loại file (optional)
+        limit: Số lượng documents trả về (default: 100)
+        skip: Số lượng documents bỏ qua (default: 0)
+    """
+    try:
+        documents = []
+        
+        # Thử lấy từ MongoDB trước
+        try:
+            client = MongoClient(Config.DATABASE_URL)
+            db = client["faiss_db"]
+            collection = db["metadata"]
+            
+            # Tạo filter
+            filter_dict = {}
+            if file_type:
+                filter_dict["file_type"] = file_type
+            
+            # Lấy documents với pagination
+            cursor = collection.find(filter_dict).skip(skip).limit(limit).sort("createdAt", -1)
+            documents = list(cursor)
+            client.close()
+            
+            if documents:
+                logger.info(f"Retrieved {len(documents)} documents from MongoDB")
+                return {
+                    "documents": documents,
+                    "total": len(documents),
+                    "source": "mongodb"
+                }
+        except PyMongoError as e:
+            logger.error(f"Failed to retrieve documents from MongoDB: {str(e)}")
+        
+        # Fallback: Lấy từ metadata.json files
+        base_path = Config.DATA_PATH if hasattr(Config, 'DATA_PATH') else "data"
+        metadata_paths = [
+            f"{base_path}/Public_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Student_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Teacher_Rag_Info/Faiss_Folder/metadata.json",
+            f"{base_path}/Admin_Rag_Info/Faiss_Folder/metadata.json"
+        ]
+        
+        for metadata_file in metadata_paths:
+            try:
+                if os.path.exists(metadata_file):
+                    with open(metadata_file, 'r', encoding='utf-8') as f:
+                        metadata_list = json.load(f)
+                    
+                    # Filter theo file_type nếu có
+                    if file_type:
+                        metadata_list = [item for item in metadata_list if item.get('file_type') == file_type]
+                    
+                    documents.extend(metadata_list)
+            except Exception as e:
+                logger.error(f"Error reading {metadata_file}: {str(e)}")
+        
+        # Sort theo createdAt (newest first) và apply pagination
+        documents.sort(key=lambda x: x.get('createdAt', ''), reverse=True)
+        total = len(documents)
+        documents = documents[skip:skip + limit]
+        
+        logger.info(f"Retrieved {len(documents)} documents from JSON files")
+        return {
+            "documents": documents,
+            "total": total,
+            "source": "json",
+            "showing": len(documents)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error retrieving documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
