@@ -3,116 +3,125 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
 import uuid
+import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from langchain_community.vectorstores import FAISS
-from app.embedding import load_new_documents, add_to_embedding, AddVectorRequest
+from app.embedding import add_to_embedding, save_metadata, AddVectorRequest
 from app.config import Config
 import shutil
+
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Khởi tạo FastAPI
 app = FastAPI()
 
-# Thêm CORS middleware để cho phép gọi API từ frontend
+# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Trong production nên chỉ định cụ thể domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Khởi tạo môi trường
-os.environ["GOOGLE_API_KEY"] = Config.GEMINI_API_KEY
+# Cấu hình môi trường
+try:
+    os.environ["GOOGLE_API_KEY"] = Config.GEMINI_API_KEY
+    logger.info("GOOGLE_API_KEY configured successfully")
+except AttributeError as e:
+    logger.error(f"Config error: {str(e)}")
+    raise HTTPException(status_code=500, detail="Configuration error: Missing GEMINI_API_KEY")
 
-def save_metadata(metadata: AddVectorRequest, file_name: str):
-    """
-    Lưu metadata vào metadata.json.
-    
-    Parameters:
-    - metadata: Metadata của tài liệu (AddVectorRequest).
-    - file_name: Tên file để gắn với metadata.
-    """
-    metadata_file = os.path.join(Config.DATA_PATH, "metadata.json")
-    os.makedirs(Config.DATA_PATH, exist_ok=True)
-    existing_metadata = []
-    if os.path.exists(metadata_file):
-        try:
-            with open(metadata_file, 'r', encoding='utf-8') as f:
-                existing_metadata = json.load(f)
-        except json.JSONDecodeError:
-            existing_metadata = []
-        except Exception:
-            existing_metadata = []
-    
-    new_metadata = {
-        "file_name": file_name,
-        "id": metadata.id,
-        "title": metadata.title,
-        "description": metadata.description,
-        "uploader": metadata.uploader
-    }
-    existing_metadata.append(new_metadata)
-    
-    try:
-        with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(existing_metadata, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save metadata: {str(e)}")
+@app.get("/health")
+async def health_check():
+    """Kiểm tra trạng thái API."""
+    logger.info("Health check requested")
+    return {"status": "ok"}
 
-@app.post("/add", response_model=dict)
-async def add_vector(
+@app.post("/documents/vector/add", response_model=dict)
+async def add_vector_document(
     file: UploadFile = File(...),
-    title: str = Form(...),
-    description: str = Form(...),
-    uploader: str = Form(...)
+    uploaded_by: str = Form(...),
+    role_user: str = Form(default="[]"),
+    role_subject: str = Form(default="[]")
 ):
-    """
-    API endpoint để thêm file và metadata từ client, tự động tạo id bằng UUID, thực hiện embedding vào FAISS.
-    
-    Parameters:
-    - file: File upload (PDF, TXT, DOCX, CSV, XLSX).
-    - title: Tiêu đề tài liệu.
-    - description: Mô tả tài liệu.
-    - uploader: Người upload.
-    
-    Returns:
-    - JSON: {"message": "Vector added", "id": "<generated_uuid>"}
-    """
+    """API endpoint để thêm tài liệu, lưu metadata và embedding vào FAISS."""
     try:
-        # Tạo ID tự động bằng UUID
+        logger.info(f"Processing file: {file.filename}, uploaded_by: {uploaded_by}")
+        
+        # Tạo metadata
         generated_id = str(uuid.uuid4())
+        vietnam_tz = timezone(timedelta(hours=7))
+        created_at = datetime.now(vietnam_tz).isoformat()
+        file_name = file.filename
+        file_path = os.path.join(Config.DATA_PATH, file_name)
+        file_url = f"file://{file_path}"
+        
+        logger.info(f"Generated metadata: _id={generated_id}, createdAt={created_at}")
 
-        # Tạo metadata từ form data và UUID
-        metadata = AddVectorRequest(id=generated_id, title=title, description=description, uploader=uploader)
+        try:
+            role = {
+                "user": json.loads(role_user),
+                "subject": json.loads(role_subject)
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON format: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid JSON format for role_user or role_subject")
+
+        # Tạo metadata object với _id được map thành id field
+        metadata = AddVectorRequest(
+            _id=generated_id,  # Sử dụng _id như alias
+            filename=file_name,
+            url=file_url,
+            uploaded_by=uploaded_by,
+            role=role,
+            createdAt=created_at
+        )
 
         # Kiểm tra định dạng file
         supported_extensions = {'.pdf', '.txt', '.docx', '.csv', '.xlsx', '.xls'}
-        file_extension = os.path.splitext(file.filename.lower())[1]
+        file_extension = os.path.splitext(file_name.lower())[1]
         if file_extension not in supported_extensions:
+            logger.error(f"Unsupported file format: {file_extension}")
             raise HTTPException(status_code=400, detail=f"File format {file_extension} not supported")
 
-        # Lưu file trực tiếp vào thư mục data với tên gốc
-        file_path = os.path.join(Config.DATA_PATH, file.filename)
-        os.makedirs(Config.DATA_PATH, exist_ok=True)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Lưu file
+        try:
+            os.makedirs(Config.DATA_PATH, exist_ok=True)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            if not os.path.exists(file_path):
+                logger.error(f"Failed to save file: {file_path}")
+                raise HTTPException(status_code=500, detail=f"Failed to save file: {file_path}")
+            logger.info(f"File saved: {file_path}")
+        except Exception as e:
+            logger.error(f"Error saving file: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
 
         # Lưu metadata
-        save_metadata(metadata, file.filename)
+        try:
+            save_metadata(metadata)
+            logger.info(f"Metadata saved for _id: {generated_id}")
+        except Exception as e:
+            logger.error(f"Error saving metadata: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to save metadata: {str(e)}")
 
-        # Thêm file mới vào FAISS index
+        # Embedding
         try:
             add_to_embedding(file_path, metadata)
+            logger.info(f"Embedding completed for file: {file_path}")
         except Exception as e:
+            logger.error(f"Error creating embeddings: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to create embeddings: {str(e)}")
 
-        return {"message": "Vector added", "id": generated_id}
+        return {"message": "Vector added", "_id": generated_id}
     except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
-# Thêm phần này để có thể chạy trực tiếp bằng F5
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

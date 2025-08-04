@@ -133,8 +133,6 @@
             cursor: pointer;
             transition: all 0.3s ease;
             width: 100%;
-            position: relative;
-            overflow: hidden;
         }
 
         .submit-btn:hover {
@@ -250,74 +248,6 @@
             color: #721c24;
         }
 
-        .index-info {
-            background: #e8f4fd;
-            border: 1px solid #b3d9f2;
-            border-radius: 10px;
-            padding: 15px;
-            margin-top: 15px;
-        }
-
-        .index-info h4 {
-            color: #1565c0;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .index-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .stat-item {
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
-            text-align: center;
-            border: 1px solid #e0e0e0;
-        }
-
-        .stat-value {
-            font-size: 1.2em;
-            font-weight: bold;
-            color: #1565c0;
-        }
-
-        .stat-label {
-            font-size: 0.9em;
-            color: #666;
-            margin-top: 5px;
-        }
-
-        .changes-info {
-            background: #f0f8f0;
-            border: 1px solid #c8e6c9;
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 10px;
-        }
-
-        .changes-info h5 {
-            color: #2e7d32;
-            margin-bottom: 8px;
-        }
-
-        .change-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 3px 0;
-            font-size: 0.9em;
-        }
-
-        .change-value {
-            font-weight: bold;
-            color: #2e7d32;
-        }
-
         .success-animation {
             animation: successPulse 2s ease-in-out;
         }
@@ -389,19 +319,18 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="title">📝 Tiêu đề:</label>
-                    <input type="text" id="title" name="title" placeholder="Nhập tiêu đề tài liệu" required>
+                    <label for="uploaded_by">👤 Người upload:</label>
+                    <input type="text" id="uploaded_by" name="uploaded_by" placeholder="Nhập tên người upload" required>
                 </div>
 
                 <div class="form-group">
-                    <label for="description">📄 Mô tả:</label>
-                    <textarea id="description" name="description" placeholder="Nhập mô tả chi tiết về tài liệu"
-                        required></textarea>
+                    <label for="role_user">👥 Role User (JSON):</label>
+                    <textarea id="role_user" name="role_user" placeholder='Ví dụ: ["u_32"]' required></textarea>
                 </div>
 
                 <div class="form-group">
-                    <label for="uploader">👤 Người upload:</label>
-                    <input type="text" id="uploader" name="uploader" placeholder="Nhập tên người upload" required>
+                    <label for="role_subject">📚 Role Subject (JSON):</label>
+                    <textarea id="role_subject" name="role_subject" placeholder='Ví dụ: ["g_45"]' required></textarea>
                 </div>
 
                 <button type="submit" class="submit-btn" id="submitBtn">
@@ -459,7 +388,6 @@
 
         // Drag and drop
         const fileInputWrapper = document.querySelector('.file-input-wrapper');
-
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             fileInputWrapper.addEventListener(eventName, preventDefaults, false);
         });
@@ -494,150 +422,87 @@
             fileInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        // Format number with thousand separators
-        function formatNumber(num) {
-            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-        }
-
-        // Create index info HTML
-        function createIndexInfoHTML(indexInfo, fileInfo) {
-            let html = `
-                <div class="index-info">
-                    <h4>📊 Thông tin FAISS Index</h4>
-            `;
-
-            if (indexInfo && indexInfo.after) {
-                html += `
-                    <div class="index-stats">
-                        <div class="stat-item">
-                            <div class="stat-value">${formatNumber(indexInfo.after.total_vectors)}</div>
-                            <div class="stat-label">Tổng Vectors</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${indexInfo.after.total_documents}</div>
-                            <div class="stat-label">Tổng Documents</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${indexInfo.after.vector_dimension}</div>
-                            <div class="stat-label">Vector Dimension</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${indexInfo.after.index_size_mb} MB</div>
-                            <div class="stat-label">Kích thước Index</div>
-                        </div>
-                    </div>
-                `;
-
-                if (indexInfo.changes) {
-                    html += `
-                        <div class="changes-info">
-                            <h5>🆕 Thay đổi sau khi upload:</h5>
-                            <div class="change-item">
-                                <span>Vectors đã thêm:</span>
-                                <span class="change-value">+${formatNumber(indexInfo.changes.vectors_added)}</span>
-                            </div>
-                            <div class="change-item">
-                                <span>Documents đã thêm:</span>
-                                <span class="change-value">+${indexInfo.changes.documents_added}</span>
-                            </div>
-                            <div class="change-item">
-                                <span>Tăng kích thước:</span>
-                                <span class="change-value">+${indexInfo.changes.size_increase_mb} MB</span>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-
-            html += `</div>`;
-            return html;
-        }
-
-        // Form submission với xử lý lỗi tốt hơn
-        document.getElementById('uploadForm').addEventListener('submit', handleFormSubmit);
-
-        async function handleFormSubmit(e) {
-            // Ngăn form submit mặc định
+        // Form submission
+        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
             e.preventDefault();
             e.stopPropagation();
 
-            console.log('Form submitted'); // Debug log
-
             const formData = new FormData();
             const file = document.getElementById('file').files[0];
-            const title = document.getElementById('title').value.trim();
-            const description = document.getElementById('description').value.trim();
-            const uploader = document.getElementById('uploader').value.trim();
+            const uploaded_by = document.getElementById('uploaded_by').value.trim();
+            const role_user = document.getElementById('role_user').value.trim();
+            const role_subject = document.getElementById('role_subject').value.trim();
 
             // Validate inputs
-            if (!file || !title || !description || !uploader) {
+            if (!file || !uploaded_by || !role_user || !role_subject) {
                 showResult('❌ Vui lòng điền đầy đủ thông tin!', 'error');
-                return false;
+                return;
+            }
+
+            // Validate JSON format for role_user and role_subject
+            try {
+                JSON.parse(role_user);
+                JSON.parse(role_subject);
+            } catch (error) {
+                showResult('❌ Định dạng JSON cho role_user hoặc role_subject không hợp lệ!', 'error');
+                return;
             }
 
             formData.append('file', file);
-            formData.append('title', title);
-            formData.append('description', description);
-            formData.append('uploader', uploader);
+            formData.append('uploaded_by', uploaded_by);
+            formData.append('role_user', role_user);
+            formData.append('role_subject', role_subject);
 
             // Show loading state
             showLoadingState(true);
 
             try {
-                console.log('Sending request to API...'); // Debug log
-
-                const response = await fetch(`${API_BASE_URL}/add`, {
+                const response = await fetch(`${API_BASE_URL}/documents/vector/add`, {
                     method: 'POST',
                     body: formData
                 });
 
-                console.log('Response received:', response.status); // Debug log
-
                 const result = await response.json();
-                console.log('Result:', result); // Debug log
 
                 if (response.ok) {
-                    // Success case
-                    const indexInfoHTML = result.index_info ? createIndexInfoHTML(result.index_info, result.file_info) : '';
+                    // Format createdAt to Vietnam time (just for display, API already returns Vietnam time)
+                    const vietnamTime = new Date(result.createdAt || new Date().toISOString()).toLocaleString('vi-VN', {
+                        timeZone: 'Asia/Ho_Chi_Minh',
+                        dateStyle: 'medium',
+                        timeStyle: 'medium'
+                    });
 
                     const successMessage = `
                         <div style="text-align: center; margin-bottom: 20px;">
                             <h2 style="color: #28a745; margin-bottom: 10px;">🎉 UPLOAD THÀNH CÔNG! 🎉</h2>
                         </div>
                         <ul>
-                            <li><strong>📋 ID:</strong> ${result.id}</li>
+                            <li><strong>📋 ID:</strong> ${result._id}</li>
                             <li><strong>📁 File:</strong> ${file.name}</li>
-                            <li><strong>📝 Tiêu đề:</strong> ${title}</li>
-                            <li><strong>📄 Mô tả:</strong> ${description}</li>
-                            <li><strong>👤 Người upload:</strong> ${uploader}</li>
-                            <li><strong>💬 Thông điệp:</strong> ${result.message || 'Đã xử lý thành công'}</li>
+                            <li><strong>👤 Người upload:</strong> ${uploaded_by}</li>
+                            <li><strong>👥 Role User:</strong> ${role_user}</li>
+                            <li><strong>📚 Role Subject:</strong> ${role_subject}</li>
+                            <li><strong>🕒 Thời gian:</strong> ${vietnamTime}</li>
+                            <li><strong>💬 Thông điệp:</strong> ${result.message}</li>
                         </ul>
-                        ${indexInfoHTML}
                         <div style="margin-top: 20px; text-align: center;">
                             <button onclick="resetForm()" class="reset-btn">
                                 🔄 Upload File Khác
                             </button>
                         </div>
                     `;
-
                     showResult(successMessage, 'success');
-
                 } else {
-                    // Error case
                     throw new Error(result.detail || `HTTP ${response.status}: ${response.statusText}`);
                 }
-
             } catch (error) {
-                console.error('Upload error:', error); // Debug log
                 showResult(`❌ <strong>Lỗi khi upload:</strong> ${error.message}`, 'error');
             } finally {
                 showLoadingState(false);
             }
+        });
 
-            return false; // Prevent any further form submission
-        }
-
-        // Separate loading state function
+        // Show/hide loading state
         function showLoadingState(isLoading) {
             const loading = document.getElementById('loading');
             const submitBtn = document.getElementById('submitBtn');
@@ -655,24 +520,22 @@
             }
         }
 
-        // Reset form function
+        // Reset form
         function resetForm() {
             document.getElementById('uploadForm').reset();
             fileLabel.textContent = 'Click để chọn file hoặc kéo thả file vào đây';
             fileInfo.style.display = 'none';
             document.getElementById('result').style.display = 'none';
-
-            // Scroll back to form
             document.getElementById('uploadForm').scrollIntoView({ behavior: 'smooth' });
         }
 
+        // Show result
         function showResult(message, type) {
             const resultDiv = document.getElementById('result');
             resultDiv.innerHTML = message;
             resultDiv.className = `result ${type}`;
             resultDiv.style.display = 'block';
 
-            // Add success animation
             if (type === 'success') {
                 resultDiv.classList.add('success-animation');
                 setTimeout(() => {
@@ -680,7 +543,6 @@
                 }, 2000);
             }
 
-            // Scroll to result with smooth animation
             setTimeout(() => {
                 resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 100);
@@ -688,8 +550,6 @@
 
         // Check API status on load
         checkApiStatus();
-
-        // Check API status every 30 seconds
         setInterval(checkApiStatus, 30000);
     </script>
 </body>

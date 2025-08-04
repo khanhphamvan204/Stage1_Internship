@@ -13,3 +13,4 @@ paddleocr
 paddlepaddle
 docx2txt
 python-multipart
+pymongo
