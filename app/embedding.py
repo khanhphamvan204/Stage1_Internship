@@ -43,15 +43,62 @@ class AddVectorRequest(BaseModel):
     url: str
     uploaded_by: str
     role: Dict[str, List[str]]
+    file_type: str 
     createdAt: str
     
     class Config:
         allow_population_by_field_name = True  # Cho phép sử dụng cả field name và alias
 
+def get_file_paths(file_type: str, filename: str) -> tuple[str, str]:
+    """
+    Trả về đường dẫn file và vector database dựa trên file_type
+    
+    Args:
+        file_type: 'public', 'student', 'teacher', 'admin'
+        filename: tên file
+    
+    Returns:
+        tuple: (file_path, vector_db_path)
+    """
+    base_path = Config.DATA_PATH if hasattr(Config, 'DATA_PATH') else "data"
+    
+    type_mapping = {
+        'public': {
+            'file_folder': f"{base_path}/Public_Rag_Info/File_Folder",
+            'vector_folder': f"{base_path}/Public_Rag_Info/Faiss_Folder"
+        },
+        'student': {
+            'file_folder': f"{base_path}/Student_Rag_Info/File_Folder", 
+            'vector_folder': f"{base_path}/Student_Rag_Info/Faiss_Folder"
+        },
+        'teacher': {
+            'file_folder': f"{base_path}/Teacher_Rag_Info/File_Folder",
+            'vector_folder': f"{base_path}/Teacher_Rag_Info/Faiss_Folder"
+        },
+        'admin': {
+            'file_folder': f"{base_path}/Admin_Rag_Info/File_Folder",
+            'vector_folder': f"{base_path}/Admin_Rag_Info/Faiss_Folder"
+        }
+    }
+    
+    if file_type not in type_mapping:
+        raise ValueError(f"Invalid file_type: {file_type}. Must be one of: {list(type_mapping.keys())}")
+    
+    file_path = os.path.join(type_mapping[file_type]['file_folder'], filename)
+    vector_db_path = type_mapping[file_type]['vector_folder']
+    
+    return file_path, vector_db_path
+
 def save_metadata(metadata: AddVectorRequest):
     """Lưu metadata vào MongoDB, fallback vào metadata.json nếu có lỗi."""
-    import os
-    metadata_file = f"{Config.DATA_PATH}/metadata.json"
+    # Tạo đường dẫn metadata dựa trên file_type
+    try:
+        _, vector_db_path = get_file_paths(metadata.file_type, metadata.filename)
+        metadata_file = os.path.join(vector_db_path, "metadata.json")
+    except ValueError as e:
+        logger.error(f"Invalid file_type in metadata: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    
     try:
         # Kết nối MongoDB
         logger.info(f"Attempting to connect to MongoDB at mongodb://localhost:27017/")
@@ -68,20 +115,20 @@ def save_metadata(metadata: AddVectorRequest):
         client.close()
     except PyMongoError as e:
         logger.error(f"Failed to save metadata to MongoDB: {str(e)}")
-        # Fallback: Lưu vào metadata.json
+        # Fallback: Lưu vào metadata.json theo file_type
         existing_metadata = []
         try:
             with open(metadata_file, 'r', encoding='utf-8') as f:
                 existing_metadata = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            logger.info(f"No existing metadata.json found, creating new")
+            logger.info(f"No existing metadata.json found at {metadata_file}, creating new")
             existing_metadata = []
         
         metadata_dict = metadata.dict(by_alias=True)
         existing_metadata.append(metadata_dict)
         
         try:
-            os.makedirs(Config.DATA_PATH, exist_ok=True)
+            os.makedirs(os.path.dirname(metadata_file), exist_ok=True)
             with open(metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(existing_metadata, f, ensure_ascii=False, indent=2)
             logger.info(f"Fallback: Successfully saved metadata to {metadata_file}")
@@ -91,7 +138,6 @@ def save_metadata(metadata: AddVectorRequest):
 
 def extract_text_with_paddle(file_path: str) -> str:
     """Trích xuất văn bản từ file sử dụng PaddleOCR."""
-    import os
     try:
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
@@ -107,7 +153,6 @@ def extract_text_with_paddle(file_path: str) -> str:
 
 def process_pdf(file_path: str) -> tuple[list, list]:
     """Xử lý file PDF, trích xuất bảng và văn bản."""
-    import os
     tables, texts = [], []
     try:
         if not os.path.exists(file_path):
@@ -137,7 +182,6 @@ def process_pdf(file_path: str) -> tuple[list, list]:
 
 def load_new_documents(file_path: str, metadata: AddVectorRequest) -> list:
     """Tải và xử lý tài liệu từ file_path, gắn metadata."""
-    import os
     documents = []
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
@@ -177,8 +221,7 @@ def load_new_documents(file_path: str, metadata: AddVectorRequest) -> list:
     return documents
 
 def add_to_embedding(file_path: str, metadata: AddVectorRequest):
-    """Thêm tài liệu vào FAISS vector store."""
-    import os
+    """Thêm tài liệu vào FAISS vector store dựa trên file_type."""
     documents = load_new_documents(file_path, metadata)
     if not documents:
         logger.warning(f"No documents loaded from {file_path}, skipping embedding.")
@@ -193,21 +236,24 @@ def add_to_embedding(file_path: str, metadata: AddVectorRequest):
         return
 
     try:
+        # Lấy vector database path dựa trên file_type
+        _, vector_db_path = get_file_paths(metadata.file_type, metadata.filename)
+        
         embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        index_exists = os.path.exists(f"{Config.VECTOR_DB_PATH}/index.faiss") and os.path.exists(f"{Config.VECTOR_DB_PATH}/index.pkl")
+        index_exists = os.path.exists(f"{vector_db_path}/index.faiss") and os.path.exists(f"{vector_db_path}/index.pkl")
         
         if index_exists:
-            logger.info(f"Loading existing FAISS index from {Config.VECTOR_DB_PATH}")
-            db = FAISS.load_local(Config.VECTOR_DB_PATH, embedding_model, allow_dangerous_deserialization=True)
+            logger.info(f"Loading existing FAISS index from {vector_db_path}")
+            db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
         else:
-            logger.info(f"No existing FAISS index found, creating new one at {Config.VECTOR_DB_PATH}")
+            logger.info(f"No existing FAISS index found, creating new one at {vector_db_path}")
             db = FAISS.from_documents(chunks, embedding_model)
             logger.info(f"FAISS index initialized successfully.")
 
         db.add_documents(chunks)
-        os.makedirs(Config.VECTOR_DB_PATH, exist_ok=True)
-        db.save_local(Config.VECTOR_DB_PATH)
-        logger.info(f"Successfully saved FAISS index to {Config.VECTOR_DB_PATH}")
+        os.makedirs(vector_db_path, exist_ok=True)
+        db.save_local(vector_db_path)
+        logger.info(f"Successfully saved FAISS index to {vector_db_path}")
     except Exception as e:
         logger.error(f"Error processing FAISS index: {str(e)}")
         raise

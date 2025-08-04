@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from app.embedding import add_to_embedding, save_metadata, AddVectorRequest
+from app.embedding import add_to_embedding, save_metadata, AddVectorRequest, get_file_paths
 from app.config import Config
 import shutil
 
@@ -45,22 +45,50 @@ async def health_check():
 async def add_vector_document(
     file: UploadFile = File(...),
     uploaded_by: str = Form(...),
+    file_type: str = Form(...),  # Thêm trường file_type bắt buộc
     role_user: str = Form(default="[]"),
     role_subject: str = Form(default="[]")
 ):
-    """API endpoint để thêm tài liệu, lưu metadata và embedding vào FAISS."""
+    """
+    API endpoint để thêm tài liệu, lưu metadata và embedding vào FAISS.
+    
+    Args:
+        file: File upload
+        uploaded_by: Người upload
+        file_type: Loại file ('public', 'student', 'teacher', 'admin')
+        role_user: JSON string chứa danh sách user roles
+        role_subject: JSON string chứa danh sách subject roles
+    """
     try:
-        logger.info(f"Processing file: {file.filename}, uploaded_by: {uploaded_by}")
+        logger.info(f"Processing file: {file.filename}, uploaded_by: {uploaded_by}, file_type: {file_type}")
+        
+        # Validate file_type
+        valid_file_types = ['public', 'student', 'teacher', 'admin']
+        if file_type not in valid_file_types:
+            logger.error(f"Invalid file_type: {file_type}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid file_type. Must be one of: {valid_file_types}"
+            )
         
         # Tạo metadata
         generated_id = str(uuid.uuid4())
         vietnam_tz = timezone(timedelta(hours=7))
         created_at = datetime.now(vietnam_tz).isoformat()
         file_name = file.filename
-        file_path = os.path.join(Config.DATA_PATH, file_name)
-        file_url = f"file://{file_path}"
+        
+        # Lấy đường dẫn file và vector database dựa trên file_type
+        try:
+            file_path, vector_db_path = get_file_paths(file_type, file_name)
+        except ValueError as e:
+            logger.error(f"Error getting file paths: {str(e)}")
+            raise HTTPException(status_code=400, detail=str(e))
+        
+        file_url = f"{file_path}"
         
         logger.info(f"Generated metadata: _id={generated_id}, createdAt={created_at}")
+        logger.info(f"File will be saved to: {file_path}")
+        logger.info(f"Vector DB will be saved to: {vector_db_path}")
 
         try:
             role = {
@@ -78,6 +106,7 @@ async def add_vector_document(
             url=file_url,
             uploaded_by=uploaded_by,
             role=role,
+            file_type=file_type,  # Thêm file_type vào metadata
             createdAt=created_at
         )
 
@@ -88,9 +117,9 @@ async def add_vector_document(
             logger.error(f"Unsupported file format: {file_extension}")
             raise HTTPException(status_code=400, detail=f"File format {file_extension} not supported")
 
-        # Lưu file
+        # Lưu file vào thư mục tương ứng với file_type
         try:
-            os.makedirs(Config.DATA_PATH, exist_ok=True)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             if not os.path.exists(file_path):
@@ -117,10 +146,44 @@ async def add_vector_document(
             logger.error(f"Error creating embeddings: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to create embeddings: {str(e)}")
 
-        return {"message": "Vector added", "_id": generated_id}
+        return {
+            "message": "Vector added successfully", 
+            "_id": generated_id,
+            "file_type": file_type,
+            "file_path": file_path,
+            "vector_db_path": vector_db_path
+        }
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+@app.get("/documents/types")
+async def get_file_types():
+    """API endpoint để lấy danh sách các loại file được hỗ trợ."""
+    return {
+        "file_types": [
+            {
+                "value": "public",
+                "label": "Thông báo chung (Public)",
+                "description": "Tài liệu công khai cho tất cả người dùng"
+            },
+            {
+                "value": "student", 
+                "label": "Sinh viên (Student)",
+                "description": "Tài liệu dành cho sinh viên"
+            },
+            {
+                "value": "teacher",
+                "label": "Giảng viên (Teacher)", 
+                "description": "Tài liệu dành cho giảng viên"
+            },
+            {
+                "value": "admin",
+                "label": "Quản trị viên (Admin)",
+                "description": "Tài liệu dành cho quản trị viên"
+            }
+        ]
+    }
 
 if __name__ == "__main__":
     import uvicorn

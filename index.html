@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 900px;
             margin: 0 auto;
             background: white;
             border-radius: 15px;
@@ -53,6 +53,12 @@
             margin-bottom: 25px;
         }
 
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
         label {
             display: block;
             margin-bottom: 8px;
@@ -63,6 +69,7 @@
 
         input[type="text"],
         input[type="file"],
+        select,
         textarea {
             width: 100%;
             padding: 15px;
@@ -75,6 +82,7 @@
 
         input[type="text"]:focus,
         input[type="file"]:focus,
+        select:focus,
         textarea:focus {
             outline: none;
             border-color: #4facfe;
@@ -82,9 +90,74 @@
             background: white;
         }
 
-        textarea {
-            resize: vertical;
-            min-height: 100px;
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 12px center;
+            background-repeat: no-repeat;
+            background-size: 16px;
+            padding-right: 40px;
+        }
+
+        .multi-select-wrapper {
+            position: relative;
+        }
+
+        .multi-select {
+            min-height: 120px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 2px solid #e1e8ed;
+            border-radius: 10px;
+            background: #f8f9fa;
+            padding: 10px;
+        }
+
+        .multi-select:focus-within {
+            border-color: #4facfe;
+            box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+            background: white;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 5px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            transition: background-color 0.2s ease;
+        }
+
+        .checkbox-item:hover {
+            background-color: #e6f3ff;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            font-weight: 500;
+            font-size: 0.95em;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        .user-info {
+            font-size: 0.8em;
+            color: #666;
+            margin-left: 5px;
+        }
+
+        .selected-count {
+            font-size: 0.9em;
+            color: #4facfe;
+            margin-top: 5px;
+            font-weight: 500;
         }
 
         .file-input-wrapper {
@@ -191,21 +264,6 @@
             color: #721c24;
         }
 
-        .result.success ul {
-            list-style: none;
-            padding: 0;
-            margin-top: 10px;
-        }
-
-        .result.success li {
-            padding: 5px 0;
-            font-size: 1em;
-        }
-
-        .result.success li strong {
-            color: #155724;
-        }
-
         .file-info {
             margin-top: 10px;
             padding: 10px;
@@ -248,27 +306,6 @@
             color: #721c24;
         }
 
-        .success-animation {
-            animation: successPulse 2s ease-in-out;
-        }
-
-        @keyframes successPulse {
-            0% {
-                transform: scale(1);
-                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
-            }
-
-            50% {
-                transform: scale(1.02);
-                box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
-            }
-
-            100% {
-                transform: scale(1);
-                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
-            }
-        }
-
         .reset-btn {
             background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
             color: white;
@@ -286,6 +323,21 @@
         .reset-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .container {
+                margin: 10px;
+            }
+
+            .form-container {
+                padding: 20px;
+            }
         }
     </style>
 </head>
@@ -318,19 +370,120 @@
                     <div class="file-info" id="fileInfo" style="display: none;"></div>
                 </div>
 
-                <div class="form-group">
-                    <label for="uploaded_by">👤 Người upload:</label>
-                    <input type="text" id="uploaded_by" name="uploaded_by" placeholder="Nhập tên người upload" required>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="uploaded_by">👤 Người upload:</label>
+                        <input type="text" id="uploaded_by" name="uploaded_by" placeholder="Nhập tên người upload"
+                            required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="file_type">📂 Loại file:</label>
+                        <select id="file_type" name="file_type" required>
+                            <option value="">-- Chọn loại file --</option>
+                            <option value="public">🌐 Thông báo chung (Public)</option>
+                            <option value="student">🎓 Sinh viên (Student)</option>
+                            <option value="teacher">👨‍🏫 Giảng viên (Teacher)</option>
+                            <option value="admin">⚙️ Quản trị viên (Admin)</option>
+                        </select>
+                    </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="role_user">👥 Role User (JSON):</label>
-                    <textarea id="role_user" name="role_user" placeholder='Ví dụ: ["u_32"]' required></textarea>
-                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>👥 Phân quyền người dùng (User ID):</label>
+                        <div class="multi-select-wrapper">
+                            <div class="multi-select" id="userSelect">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="user_001" value="user_001">
+                                    <label for="user_001">
+                                        Nguyễn Văn A
+                                        <span class="user-info">user_001 • teacher • cntt</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="user_002" value="user_002">
+                                    <label for="user_002">
+                                        Trần Thị B
+                                        <span class="user-info">user_002 • teacher • toan</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="user_003" value="user_003">
+                                    <label for="user_003">
+                                        Lê Văn C
+                                        <span class="user-info">user_003 • student • cntt</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="user_004" value="user_004">
+                                    <label for="user_004">
+                                        Phạm Thị D
+                                        <span class="user-info">user_004 • admin • system</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="user_005" value="user_005">
+                                    <label for="user_005">
+                                        Hoàng Văn E
+                                        <span class="user-info">user_005 • teacher • vatly</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="selected-count" id="userCount">Đã chọn: 0 người dùng</div>
+                        </div>
+                    </div>
 
-                <div class="form-group">
-                    <label for="role_subject">📚 Role Subject (JSON):</label>
-                    <textarea id="role_subject" name="role_subject" placeholder='Ví dụ: ["g_45"]' required></textarea>
+                    <div class="form-group">
+                        <label>📚 Chủ đề (Subject):</label>
+                        <div class="multi-select-wrapper">
+                            <div class="multi-select" id="subjectSelect">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_cntt" value="cntt">
+                                    <label for="subject_cntt">
+                                        Công nghệ thông tin
+                                        <span class="user-info">cntt</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_toan" value="toan">
+                                    <label for="subject_toan">
+                                        Toán học
+                                        <span class="user-info">toan</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_vatly" value="vatly">
+                                    <label for="subject_vatly">
+                                        Vật lý
+                                        <span class="user-info">vatly</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_hoa" value="hoa">
+                                    <label for="subject_hoa">
+                                        Hóa học
+                                        <span class="user-info">hoa</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_sinh" value="sinh">
+                                    <label for="subject_sinh">
+                                        Sinh học
+                                        <span class="user-info">sinh</span>
+                                    </label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="subject_chung" value="chung">
+                                    <label for="subject_chung">
+                                        Chung
+                                        <span class="user-info">chung</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="selected-count" id="subjectCount">Đã chọn: 0 chủ đề</div>
+                        </div>
+                    </div>
                 </div>
 
                 <button type="submit" class="submit-btn" id="submitBtn">
@@ -386,6 +539,30 @@
             }
         });
 
+        // Multi-select handling
+        function setupMultiSelect(containerId, countId, type) {
+            const container = document.getElementById(containerId);
+            const countElement = document.getElementById(countId);
+            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+
+            checkboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', () => {
+                    const selectedCount = container.querySelectorAll('input[type="checkbox"]:checked').length;
+                    countElement.textContent = `Đã chọn: ${selectedCount} ${type}`;
+                });
+            });
+        }
+
+        setupMultiSelect('userSelect', 'userCount', 'người dùng');
+        setupMultiSelect('subjectSelect', 'subjectCount', 'chủ đề');
+
+        // Get selected values
+        function getSelectedValues(containerId) {
+            const container = document.getElementById(containerId);
+            const selectedCheckboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+            return Array.from(selectedCheckboxes).map(checkbox => checkbox.value);
+        }
+
         // Drag and drop
         const fileInputWrapper = document.querySelector('.file-input-wrapper');
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -430,26 +607,27 @@
             const formData = new FormData();
             const file = document.getElementById('file').files[0];
             const uploaded_by = document.getElementById('uploaded_by').value.trim();
-            const role_user = document.getElementById('role_user').value.trim();
-            const role_subject = document.getElementById('role_subject').value.trim();
+            const file_type = document.getElementById('file_type').value;
+            const selectedUsers = getSelectedValues('userSelect');
+            const selectedSubjects = getSelectedValues('subjectSelect');
 
             // Validate inputs
-            if (!file || !uploaded_by || !role_user || !role_subject) {
-                showResult('❌ Vui lòng điền đầy đủ thông tin!', 'error');
+            if (!file || !uploaded_by || !file_type) {
+                showResult('❌ Vui lòng điền đầy đủ thông tin bắt buộc!', 'error');
                 return;
             }
 
-            // Validate JSON format for role_user and role_subject
-            try {
-                JSON.parse(role_user);
-                JSON.parse(role_subject);
-            } catch (error) {
-                showResult('❌ Định dạng JSON cho role_user hoặc role_subject không hợp lệ!', 'error');
+            if (selectedUsers.length === 0 && selectedSubjects.length === 0) {
+                showResult('❌ Vui lòng chọn ít nhất một người dùng hoặc một chủ đề!', 'error');
                 return;
             }
+
+            const role_user = JSON.stringify(selectedUsers);
+            const role_subject = JSON.stringify(selectedSubjects);
 
             formData.append('file', file);
             formData.append('uploaded_by', uploaded_by);
+            formData.append('file_type', file_type);
             formData.append('role_user', role_user);
             formData.append('role_subject', role_subject);
 
@@ -465,8 +643,7 @@
                 const result = await response.json();
 
                 if (response.ok) {
-                    // Format createdAt to Vietnam time (just for display, API already returns Vietnam time)
-                    const vietnamTime = new Date(result.createdAt || new Date().toISOString()).toLocaleString('vi-VN', {
+                    const vietnamTime = new Date().toLocaleString('vi-VN', {
                         timeZone: 'Asia/Ho_Chi_Minh',
                         dateStyle: 'medium',
                         timeStyle: 'medium'
@@ -479,11 +656,13 @@
                         <ul>
                             <li><strong>📋 ID:</strong> ${result._id}</li>
                             <li><strong>📁 File:</strong> ${file.name}</li>
+                            <li><strong>📂 Loại file:</strong> ${file_type}</li>
                             <li><strong>👤 Người upload:</strong> ${uploaded_by}</li>
-                            <li><strong>👥 Role User:</strong> ${role_user}</li>
-                            <li><strong>📚 Role Subject:</strong> ${role_subject}</li>
+                            <li><strong>👥 Users:</strong> ${selectedUsers.join(', ') || 'Không có'}</li>
+                            <li><strong>📚 Subjects:</strong> ${selectedSubjects.join(', ') || 'Không có'}</li>
                             <li><strong>🕒 Thời gian:</strong> ${vietnamTime}</li>
-                            <li><strong>💬 Thông điệp:</strong> ${result.message}</li>
+                            <li><strong>📁 File path:</strong> ${result.file_path || 'N/A'}</li>
+                            <li><strong>🗂️ Vector DB path:</strong> ${result.vector_db_path || 'N/A'}</li>
                         </ul>
                         <div style="margin-top: 20px; text-align: center;">
                             <button onclick="resetForm()" class="reset-btn">
@@ -526,6 +705,11 @@
             fileLabel.textContent = 'Click để chọn file hoặc kéo thả file vào đây';
             fileInfo.style.display = 'none';
             document.getElementById('result').style.display = 'none';
+
+            // Reset multi-select counters
+            document.getElementById('userCount').textContent = 'Đã chọn: 0 người dùng';
+            document.getElementById('subjectCount').textContent = 'Đã chọn: 0 chủ đề';
+
             document.getElementById('uploadForm').scrollIntoView({ behavior: 'smooth' });
         }
 
@@ -535,13 +719,6 @@
             resultDiv.innerHTML = message;
             resultDiv.className = `result ${type}`;
             resultDiv.style.display = 'block';
-
-            if (type === 'success') {
-                resultDiv.classList.add('success-animation');
-                setTimeout(() => {
-                    resultDiv.classList.remove('success-animation');
-                }, 2000);
-            }
 
             setTimeout(() => {
                 resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
