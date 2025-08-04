@@ -86,6 +86,7 @@ def get_file_paths(file_type: str, filename: str) -> tuple[str, str]:
         raise ValueError(f"Invalid file_type: {file_type}. Must be one of: {list(type_mapping.keys())}")
     
     file_path = os.path.join(type_mapping[file_type]['file_folder'], filename)
+    file_path = file_path.replace("\\", "/")
     vector_db_path = type_mapping[file_type]['vector_folder']
     
     return file_path, vector_db_path

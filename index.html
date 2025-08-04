@@ -442,6 +442,23 @@
             box-shadow: 0 5px 15px rgba(23, 162, 184, 0.3);
         }
 
+        .edit-btn {
+            background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+        }
+
+        .edit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 193, 7, 0.3);
+        }
+
         /* Loading and Results */
         .loading {
             display: none;
@@ -509,13 +526,15 @@
 
         .modal-content {
             background-color: white;
-            margin: 10% auto;
+            margin: 5% auto;
             padding: 30px;
             border-radius: 15px;
             width: 90%;
-            max-width: 500px;
+            max-width: 800px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
             animation: modalSlideIn 0.3s ease;
+            max-height: 80vh;
+            overflow-y: auto;
         }
 
         @keyframes modalSlideIn {
@@ -536,7 +555,7 @@
         }
 
         .modal-header h2 {
-            color: #dc3545;
+            color: #333;
             font-size: 1.5em;
             margin-bottom: 10px;
         }
@@ -575,6 +594,29 @@
         .cancel-btn:hover,
         .confirm-btn:hover {
             transform: translateY(-2px);
+        }
+
+        .update-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .update-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .update-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         /* Stats */
@@ -676,6 +718,16 @@
                 flex-direction: column;
                 gap: 15px;
             }
+
+            .document-actions {
+                flex-direction: column;
+            }
+
+            .modal-content {
+                margin: 2% auto;
+                width: 95%;
+                max-height: 95vh;
+            }
         }
 
         .file-info {
@@ -718,6 +770,53 @@
             transform: translateY(-2px);
             box-shadow: 0 8px 15px rgba(40, 167, 69, 0.3);
         }
+
+        /* Update Form Styles */
+        .update-form {
+            margin-top: 20px;
+        }
+
+        .update-form .form-group {
+            margin-bottom: 20px;
+        }
+
+        .current-value {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+            border: 1px solid #e1e8ed;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+
+        .change-indicator {
+            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+        }
+
+        .change-indicator.modified {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .change-indicator.unchanged {
+            background: #d4edda;
+            color: #155724;
+        }
     </style>
 </head>
 
@@ -728,6 +827,133 @@
         <div class="header">
             <h1>🚀 FAISS API Management</h1>
             <p>Quản lý tài liệu và vector embedding</p>
+        </div>
+
+        <!-- Update Document Modal -->
+        <div id="updateModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>✏️ Cập nhật tài liệu</h2>
+                    <p>Chỉnh sửa thông tin tài liệu</p>
+                </div>
+
+                <form id="updateForm" class="update-form">
+                    <input type="hidden" id="updateDocId" name="docId">
+
+                    <div class="form-group">
+                        <label for="updateFilename">📁 Tên file:</label>
+                        <div class="current-value" id="currentFilename"></div>
+                        <input type="text" id="updateFilename" name="filename"
+                            placeholder="Nhập tên file mới (để trống nếu không thay đổi)">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="updateUploadedBy">👤 Người upload:</label>
+                        <div class="current-value" id="currentUploadedBy"></div>
+                        <input type="text" id="updateUploadedBy" name="uploaded_by"
+                            placeholder="Nhập tên người upload mới (để trống nếu không thay đổi)">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="updateFileType">📂 Loại file:</label>
+                        <div class="current-value" id="currentFileType"></div>
+                        <select id="updateFileType" name="file_type">
+                            <option value="">-- Không thay đổi --</option>
+                            <option value="public">🌐 Thông báo chung (Public)</option>
+                            <option value="student">🎓 Sinh viên (Student)</option>
+                            <option value="teacher">👨‍🏫 Giảng viên (Teacher)</option>
+                            <option value="admin">⚙️ Quản trị viên (Admin)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>👥 Phân quyền người dùng:</label>
+                        <div class="current-value" id="currentUsers"></div>
+                        <div class="checkbox-grid" id="updateUserSelect">
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_user_001" value="user_001">
+                                <label for="update_user_001">Nguyễn Văn A (user_001)</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_user_002" value="user_002">
+                                <label for="update_user_002">Trần Thị B (user_002)</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_user_003" value="user_003">
+                                <label for="update_user_003">Lê Văn C (user_003)</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_user_004" value="user_004">
+                                <label for="update_user_004">Phạm Thị D (user_004)</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_user_005" value="user_005">
+                                <label for="update_user_005">Hoàng Văn E (user_005)</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>📚 Chủ đề:</label>
+                        <div class="current-value" id="currentSubjects"></div>
+                        <div class="checkbox-grid" id="updateSubjectSelect">
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_cntt" value="cntt">
+                                <label for="update_subject_cntt">Công nghệ thông tin</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_toan" value="toan">
+                                <label for="update_subject_toan">Toán học</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_vatly" value="vatly">
+                                <label for="update_subject_vatly">Vật lý</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_hoa" value="hoa">
+                                <label for="update_subject_hoa">Hóa học</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_sinh" value="sinh">
+                                <label for="update_subject_sinh">Sinh học</label>
+                            </div>
+                            <div class="checkbox-item">
+                                <input type="checkbox" id="update_subject_chung" value="chung">
+                                <label for="update_subject_chung">Chung</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="loading" id="updateLoading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Đang cập nhật...</p>
+                    </div>
+                </form>
+
+                <div class="modal-buttons">
+                    <button class="cancel-btn" onclick="closeUpdateModal()">Hủy</button>
+                    <button class="update-btn" id="confirmUpdateBtn" onclick="confirmUpdate()">✏️ Cập nhật</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Delete Document Modal -->
+        <div id="deleteModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>🗑️ Xác nhận xóa tài liệu</h2>
+                    <p>Bạn có chắc muốn xóa tài liệu này không?</p>
+                </div>
+                <p id="deleteConfirmText"></p>
+                <div class="loading" id="deleteLoading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Đang xóa...</p>
+                </div>
+                <div class="modal-buttons">
+                    <button class="cancel-btn" onclick="closeDeleteModal()">Hủy</button>
+                    <button class="confirm-btn" id="confirmDeleteBtn" onclick="confirmDelete()">Xóa</button>
+                </div>
+            </div>
         </div>
 
         <div class="tabs">
@@ -875,462 +1101,197 @@
                     </div>
                 </div>
 
-                <button type="submit" class="submit-btn" id="submitBtn">
-                    Upload & Process
-                </button>
+                <button type="submit" class="submit-btn" id="submitBtn">📤 Tải lên</button>
+                <div class="loading" id="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Đang tải lên...</p>
+                </div>
             </form>
-
-            <div class="loading" id="uploadLoading">
-                <div class="spinner"></div>
-                <p>Đang xử lý file... Vui lòng đợi</p>
-            </div>
-
-            <div class="result" id="uploadResult"></div>
         </div>
 
-        <!-- Management Tab -->
+        <!-- Manage Tab -->
         <div class="tab-content" id="manageTab">
-            <div class="stats-bar" id="statsBar">
+            <div class="stats-bar">
                 <div class="stats-item">
-                    <div class="stats-number" id="totalDocs">0</div>
+                    <div class="stats-number" id="statsTotal">0</div>
                     <div class="stats-label">Tổng tài liệu</div>
                 </div>
                 <div class="stats-item">
-                    <div class="stats-number" id="publicDocs">0</div>
-                    <div class="stats-label">Public</div>
-                </div>
-                <div class="stats-item">
-                    <div class="stats-number" id="studentDocs">0</div>
-                    <div class="stats-label">Student</div>
-                </div>
-                <div class="stats-item">
-                    <div class="stats-number" id="teacherDocs">0</div>
-                    <div class="stats-label">Teacher</div>
-                </div>
-                <div class="stats-item">
-                    <div class="stats-number" id="adminDocs">0</div>
-                    <div class="stats-label">Admin</div>
+                    <div class="stats-number" id="statsShowing">0</div>
+                    <div class="stats-label">Đang hiển thị</div>
                 </div>
             </div>
 
             <div class="search-filter-bar">
-                <input type="text" class="search-input" id="searchInput" placeholder="🔍 Tìm kiếm tài liệu...">
-                <select class="filter-select" id="typeFilter">
+                <input type="text" id="searchInput" class="search-input"
+                    placeholder="Tìm kiếm theo tên hoặc người upload...">
+                <select id="filterType" class="filter-select">
                     <option value="">Tất cả loại</option>
-                    <option value="public">Public</option>
-                    <option value="student">Student</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="admin">Admin</option>
+                    <option value="public">Thông báo chung</option>
+                    <option value="student">Sinh viên</option>
+                    <option value="teacher">Giảng viên</option>
+                    <option value="admin">Quản trị viên</option>
                 </select>
-                <button class="refresh-btn" onclick="loadDocuments()">🔄 Refresh</button>
-            </div>
-
-            <div class="loading" id="documentsLoading">
-                <div class="spinner"></div>
-                <p>Đang tải danh sách tài liệu...</p>
+                <button class="refresh-btn" id="refreshBtn">🔄 Làm mới</button>
             </div>
 
             <div class="documents-grid" id="documentsGrid"></div>
-
-            <div class="empty-state" id="emptyState" style="display: none;">
-                <h3>📄 Chưa có tài liệu nào</h3>
-                <p>Hãy bắt đầu bằng cách upload tài liệu đầu tiên của bạn!</p>
+            <div class="loading" id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Đang tải...</p>
             </div>
-
             <div class="result" id="manageResult"></div>
         </div>
     </div>
 
-    <!-- Delete Confirmation Modal -->
-    <div id="deleteModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>🗑️ Xác nhận xóa</h2>
-                <p>Bạn có chắc chắn muốn xóa tài liệu này không?</p>
-                <div id="deleteDocInfo"
-                    style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; text-align: left;">
-                </div>
-                <p style="color: #dc3545; font-weight: 600;">⚠️ Hành động này không thể hoàn tác!</p>
-            </div>
-            <div class="modal-buttons">
-                <button class="cancel-btn" onclick="closeDeleteModal()">Hủy</button>
-                <button class="confirm-btn" id="confirmDeleteBtn" onclick="confirmDelete()">Xóa</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Document Info Modal -->
-    <div id="infoModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <div class="modal-header">
-                <h2>📋 Chi tiết tài liệu</h2>
-            </div>
-            <div id="documentDetails" style="text-align: left; line-height: 1.6;">
-            </div>
-            <div class="modal-buttons">
-                <button class="cancel-btn" onclick="closeInfoModal()">Đóng</button>
-            </div>
-        </div>
-    </div>
-
     <script>
-        const API_BASE_URL = 'http://localhost:8000';
-        let currentDocuments = [];
-        let filteredDocuments = [];
+        // Biến toàn cục để lưu tài liệu đang được chỉnh sửa hoặc xóa
+        let documentToUpdate = null;
         let documentToDelete = null;
 
-        // Check API status
-        async function checkApiStatus() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/health`);
-                const status = document.getElementById('apiStatus');
-                if (response.ok) {
-                    status.textContent = '🟢 API Online';
-                    status.className = 'api-status online';
-                } else {
-                    throw new Error('API not responding');
-                }
-            } catch (error) {
-                const status = document.getElementById('apiStatus');
-                status.textContent = '🔴 API Offline';
-                status.className = 'api-status offline';
-            }
+        // Chuyển đổi tab
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabId + 'Tab').classList.add('active');
+            document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
         }
 
-        // Tab switching
-        function switchTab(tab) {
-            // Update tab buttons
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+        // Mở modal cập nhật
+        function openUpdateModal(docId) {
+            documentToUpdate = null;
+            document.getElementById('updateModal').style.display = 'block';
+            document.getElementById('updateLoading').style.display = 'block';
+            document.getElementById('confirmUpdateBtn').disabled = true;
 
-            if (tab === 'upload') {
-                document.querySelector('.tab:first-child').classList.add('active');
-                document.getElementById('uploadTab').classList.add('active');
-            } else if (tab === 'manage') {
-                document.querySelector('.tab:last-child').classList.add('active');
-                document.getElementById('manageTab').classList.add('active');
-                loadDocuments();
-            }
-        }
+            // Lấy thông tin tài liệu từ API
+            fetch(`${API_BASE_URL}/documents/vector/${docId}`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Không tìm thấy tài liệu');
+                    return response.json();
+                })
+                .then(doc => {
+                    documentToUpdate = doc;
+                    // Điền thông tin hiện tại
+                    document.getElementById('updateDocId').value = doc._id;
+                    document.getElementById('currentFilename').textContent = doc.filename || 'Không có';
+                    document.getElementById('currentUploadedBy').textContent = doc.uploaded_by || 'Không có';
+                    document.getElementById('currentFileType').textContent = doc.file_type || 'Không có';
+                    document.getElementById('currentUsers').textContent = JSON.stringify(doc.role?.user || []).replace(/"/g, '') || 'Không có';
+                    document.getElementById('currentSubjects').textContent = JSON.stringify(doc.role?.subject || []).replace(/"/g, '') || 'Không có';
 
-        // File input handling
-        const fileInput = document.getElementById('file');
-        const fileInfo = document.getElementById('fileInfo');
-        const fileLabel = document.querySelector('.file-input-label span');
+                    // Reset form
+                    document.getElementById('updateFilename').value = '';
+                    document.getElementById('updateUploadedBy').value = '';
+                    document.getElementById('updateFileType').value = '';
+                    document.querySelectorAll('#updateUserSelect input[type="checkbox"]').forEach(checkbox => checkbox.checked = false);
+                    document.querySelectorAll('#updateSubjectSelect input[type="checkbox"]').forEach(checkbox => checkbox.checked = false);
 
-        fileInput.addEventListener('change', function (e) {
-            const file = e.target.files[0];
-            if (file) {
-                fileLabel.textContent = `✅ Đã chọn: ${file.name}`;
-                fileInfo.style.display = 'block';
-                fileInfo.innerHTML = `
-                    <strong>File:</strong> ${file.name}<br>
-                    <strong>Kích thước:</strong> ${(file.size / 1024 / 1024).toFixed(2)} MB<br>
-                    <strong>Loại:</strong> ${file.type || 'Unknown'}
-                `;
-            }
-        });
-
-        // Multi-select handling
-        function setupMultiSelect(containerId, countId, type) {
-            const container = document.getElementById(containerId);
-            const countElement = document.getElementById(countId);
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-
-            checkboxes.forEach(checkbox => {
-                checkbox.addEventListener('change', () => {
-                    const selectedCount = container.querySelectorAll('input[type="checkbox"]:checked').length;
-                    countElement.textContent = `Đã chọn: ${selectedCount} ${type}`;
+                    // Điền giá trị mặc định nếu có thay đổi
+                    if (doc.role?.user) {
+                        doc.role.user.forEach(user => {
+                            const checkbox = document.getElementById(`update_${user}`);
+                            if (checkbox) checkbox.checked = true;
+                        });
+                    }
+                    if (doc.role?.subject) {
+                        doc.role.subject.forEach(subject => {
+                            const checkbox = document.getElementById(`update_subject_${subject}`);
+                            if (checkbox) checkbox.checked = true;
+                        });
+                    }
+                })
+                .catch(error => {
+                    showManageResult(`❌ Lỗi khi tải thông tin: ${error.message}`, 'error');
+                })
+                .finally(() => {
+                    document.getElementById('updateLoading').style.display = 'none';
+                    document.getElementById('confirmUpdateBtn').disabled = false;
                 });
-            });
         }
 
-        setupMultiSelect('userSelect', 'userCount', 'người dùng');
-        setupMultiSelect('subjectSelect', 'subjectCount', 'chủ đề');
-
-        // Get selected values
-        function getSelectedValues(containerId) {
-            const container = document.getElementById(containerId);
-            const selectedCheckboxes = container.querySelectorAll('input[type="checkbox"]:checked');
-            return Array.from(selectedCheckboxes).map(checkbox => checkbox.value);
+        // Đóng modal cập nhật
+        function closeUpdateModal() {
+            document.getElementById('updateModal').style.display = 'none';
+            document.getElementById('updateForm').reset();
         }
 
-        // Drag and drop
-        const fileInputWrapper = document.querySelector('.file-input-wrapper');
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            fileInputWrapper.addEventListener(eventName, preventDefaults, false);
-        });
+        // Xử lý cập nhật tài liệu
+        async function confirmUpdate() {
+            if (!documentToUpdate) return;
 
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
-        ['dragenter', 'dragover'].forEach(eventName => {
-            fileInputWrapper.addEventListener(eventName, highlight, false);
-        });
-
-        ['dragleave', 'drop'].forEach(eventName => {
-            fileInputWrapper.addEventListener(eventName, unhighlight, false);
-        });
-
-        function highlight(e) {
-            fileInputWrapper.classList.add('highlight');
-        }
-
-        function unhighlight(e) {
-            fileInputWrapper.classList.remove('highlight');
-        }
-
-        fileInputWrapper.addEventListener('drop', handleDrop, false);
-
-        function handleDrop(e) {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            fileInput.files = files;
-            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-
-        // Form submission
-        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
-            e.preventDefault();
+            const confirmUpdateBtn = document.getElementById('confirmUpdateBtn');
+            confirmUpdateBtn.disabled = true;
+            confirmUpdateBtn.textContent = 'Đang cập nhật...';
+            document.getElementById('updateLoading').style.display = 'block';
 
             const formData = new FormData();
-            const file = document.getElementById('file').files[0];
-            const uploaded_by = document.getElementById('uploaded_by').value.trim();
-            const file_type = document.getElementById('file_type').value;
-            const selectedUsers = getSelectedValues('userSelect');
-            const selectedSubjects = getSelectedValues('subjectSelect');
+            formData.append('doc_id', document.getElementById('updateDocId').value);
 
-            // Validate inputs
-            if (!file || !uploaded_by || !file_type) {
-                showUploadResult('❌ Vui lòng điền đầy đủ thông tin bắt buộc!', 'error');
-                return;
-            }
+            const newFilename = document.getElementById('updateFilename').value.trim();
+            if (newFilename) formData.append('filename', newFilename);
 
-            if (selectedUsers.length === 0 && selectedSubjects.length === 0) {
-                showUploadResult('❌ Vui lòng chọn ít nhất một người dùng hoặc một chủ đề!', 'error');
-                return;
-            }
+            const newUploadedBy = document.getElementById('updateUploadedBy').value.trim();
+            if (newUploadedBy) formData.append('uploaded_by', newUploadedBy);
 
-            const role_user = JSON.stringify(selectedUsers);
-            const role_subject = JSON.stringify(selectedSubjects);
+            const newFileType = document.getElementById('updateFileType').value;
+            if (newFileType) formData.append('file_type', newFileType);
 
-            formData.append('file', file);
-            formData.append('uploaded_by', uploaded_by);
-            formData.append('file_type', file_type);
-            formData.append('role_user', role_user);
-            formData.append('role_subject', role_subject);
+            const roleUser = [];
+            document.querySelectorAll('#updateUserSelect input[type="checkbox"]:checked').forEach(checkbox => {
+                roleUser.push(checkbox.value);
+            });
+            if (roleUser.length) formData.append('role_user', JSON.stringify(roleUser));
 
-            showUploadLoadingState(true);
+            const roleSubject = [];
+            document.querySelectorAll('#updateSubjectSelect input[type="checkbox"]:checked').forEach(checkbox => {
+                roleSubject.push(checkbox.value);
+            });
+            if (roleSubject.length) formData.append('role_subject', JSON.stringify(roleSubject));
 
             try {
-                const response = await fetch(`${API_BASE_URL}/documents/vector/add`, {
-                    method: 'POST',
+                const response = await fetch(`${API_BASE_URL}/documents/vector/${documentToUpdate._id}`, {
+                    method: 'PUT',
                     body: formData
                 });
 
                 const result = await response.json();
 
                 if (response.ok) {
-                    const vietnamTime = new Date().toLocaleString('vi-VN', {
-                        timeZone: 'Asia/Ho_Chi_Minh',
-                        dateStyle: 'medium',
-                        timeStyle: 'medium'
-                    });
-
-                    const successMessage = `
-                        <div style="text-align: center; margin-bottom: 20px;">
-                            <h2 style="color: #28a745; margin-bottom: 10px;">🎉 UPLOAD THÀNH CÔNG! 🎉</h2>
-                        </div>
-                        <ul>
-                            <li><strong>📋 ID:</strong> ${result._id}</li>
-                            <li><strong>📁 File:</strong> ${file.name}</li>
-                            <li><strong>📂 Loại file:</strong> ${file_type}</li>
-                            <li><strong>👤 Người upload:</strong> ${uploaded_by}</li>
-                            <li><strong>👥 Users:</strong> ${selectedUsers.join(', ') || 'Không có'}</li>
-                            <li><strong>📚 Subjects:</strong> ${selectedSubjects.join(', ') || 'Không có'}</li>
-                            <li><strong>🕒 Thời gian:</strong> ${vietnamTime}</li>
-                        </ul>
-                        <div style="margin-top: 20px; text-align: center;">
-                            <button onclick="resetUploadForm()" class="reset-btn">
-                                🔄 Upload File Khác
-                            </button>
-                            <button onclick="switchTab('manage')" class="reset-btn" style="margin-left: 10px;">
-                                📋 Xem Danh Sách
-                            </button>
-                        </div>
-                    `;
-                    showUploadResult(successMessage, 'success');
+                    showManageResult(`✅ Cập nhật thành công tài liệu: ${documentToUpdate.filename}`, 'success');
+                    closeUpdateModal();
+                    loadDocuments(); // Tải lại danh sách
                 } else {
-                    throw new Error(result.detail || `HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(result.detail || 'Cập nhật thất bại');
                 }
             } catch (error) {
-                showUploadResult(`❌ <strong>Lỗi khi upload:</strong> ${error.message}`, 'error');
+                showManageResult(`❌ Lỗi khi cập nhật: ${error.message}`, 'error');
             } finally {
-                showUploadLoadingState(false);
-            }
-        });
-
-        // Load documents
-        async function loadDocuments() {
-            const loading = document.getElementById('documentsLoading');
-            const grid = document.getElementById('documentsGrid');
-            const emptyState = document.getElementById('emptyState');
-
-            loading.style.display = 'block';
-            grid.innerHTML = '';
-            emptyState.style.display = 'none';
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/documents/list?limit=100`);
-                const result = await response.json();
-
-                if (response.ok) {
-                    currentDocuments = result.documents || [];
-                    updateStats();
-                    renderDocuments();
-                } else {
-                    throw new Error(result.detail || 'Failed to load documents');
-                }
-            } catch (error) {
-                showManageResult(`❌ Lỗi khi tải danh sách: ${error.message}`, 'error');
-                currentDocuments = [];
-                updateStats();
-            } finally {
-                loading.style.display = 'none';
+                confirmUpdateBtn.disabled = false;
+                confirmUpdateBtn.textContent = '✏️ Cập nhật';
+                document.getElementById('updateLoading').style.display = 'none';
             }
         }
 
-        // Update statistics
-        function updateStats() {
-            const total = currentDocuments.length;
-            const stats = {
-                public: currentDocuments.filter(doc => doc.file_type === 'public').length,
-                student: currentDocuments.filter(doc => doc.file_type === 'student').length,
-                teacher: currentDocuments.filter(doc => doc.file_type === 'teacher').length,
-                admin: currentDocuments.filter(doc => doc.file_type === 'admin').length
-            };
-
-            document.getElementById('totalDocs').textContent = total;
-            document.getElementById('publicDocs').textContent = stats.public;
-            document.getElementById('studentDocs').textContent = stats.student;
-            document.getElementById('teacherDocs').textContent = stats.teacher;
-            document.getElementById('adminDocs').textContent = stats.admin;
-        }
-
-        // Render documents
-        function renderDocuments() {
-            const grid = document.getElementById('documentsGrid');
-            const emptyState = document.getElementById('emptyState');
-
-            if (filteredDocuments.length === 0) {
-                grid.innerHTML = '';
-                emptyState.style.display = 'block';
-                return;
-            }
-
-            emptyState.style.display = 'none';
-
-            grid.innerHTML = filteredDocuments.map(doc => `
-                <div class="document-card">
-                    <div class="document-header">
-                        <div class="document-title">${doc.filename || 'Untitled'}</div>
-                        <div class="document-type ${doc.file_type || 'public'}">${doc.file_type || 'public'}</div>
-                    </div>
-                    <div class="document-info">
-                        <div><strong>👤 Người upload:</strong> ${doc.uploaded_by || 'Unknown'}</div>
-                        <div><strong>🕒 Ngày tạo:</strong> ${formatDate(doc.createdAt)}</div>
-                        <div><strong>📋 ID:</strong> ${doc._id}</div>
-                    </div>
-                    <div class="document-roles">
-                        ${renderRoles(doc.role)}
-                    </div>
-                    <div class="document-actions">
-                        <button class="info-btn" onclick="showDocumentInfo('${doc._id}')">ℹ️ Chi tiết</button>
-                        <button class="delete-btn" onclick="showDeleteModal('${doc._id}')">🗑️ Xóa</button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        // Format date
-        function formatDate(dateString) {
-            if (!dateString) return 'Unknown';
-            try {
-                return new Date(dateString).toLocaleString('vi-VN', {
-                    timeZone: 'Asia/Ho_Chi_Minh',
-                    dateStyle: 'short',
-                    timeStyle: 'short'
-                });
-            } catch (error) {
-                return dateString;
-            }
-        }
-
-        // Render roles
-        function renderRoles(role) {
-            if (!role) return '';
-
-            const tags = [];
-            if (role.user && role.user.length > 0) {
-                tags.push(...role.user.map(user => `<span class="role-tag">👤 ${user}</span>`));
-            }
-            if (role.subject && role.subject.length > 0) {
-                tags.push(...role.subject.map(subject => `<span class="role-tag">📚 ${subject}</span>`));
-            }
-
-            return tags.join('');
-        }
-
-        // Search and filter
-        document.getElementById('searchInput').addEventListener('input', filterDocuments);
-        document.getElementById('typeFilter').addEventListener('change', filterDocuments);
-
-        function filterDocuments() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const typeFilter = document.getElementById('typeFilter').value;
-
-            filteredDocuments = currentDocuments.filter(doc => {
-                const matchesSearch = !searchTerm ||
-                    (doc.filename && doc.filename.toLowerCase().includes(searchTerm)) ||
-                    (doc.uploaded_by && doc.uploaded_by.toLowerCase().includes(searchTerm)) ||
-                    (doc._id && doc._id.toLowerCase().includes(searchTerm));
-
-                const matchesType = !typeFilter || doc.file_type === typeFilter;
-
-                return matchesSearch && matchesType;
-            });
-
-            renderDocuments();
-        }
-
-        // Delete modal functions
-        function showDeleteModal(docId) {
-            const doc = currentDocuments.find(d => d._id === docId);
-            if (!doc) return;
-
-            documentToDelete = doc;
-            document.getElementById('deleteDocInfo').innerHTML = `
-                <strong>📁 File:</strong> ${doc.filename}<br>
-                <strong>📂 Loại:</strong> ${doc.file_type}<br>
-                <strong>👤 Người upload:</strong> ${doc.uploaded_by}<br>
-                <strong>🕒 Ngày tạo:</strong> ${formatDate(doc.createdAt)}
-            `;
+        // Mở modal xóa
+        function openDeleteModal(docId, filename) {
+            documentToDelete = { _id: docId, filename: filename };
             document.getElementById('deleteModal').style.display = 'block';
+            document.getElementById('deleteConfirmText').textContent = `Bạn có chắc muốn xóa tài liệu "${filename}"?`;
         }
 
+        // Đóng modal xóa
         function closeDeleteModal() {
             document.getElementById('deleteModal').style.display = 'none';
-            documentToDelete = null;
         }
 
+        // Xử lý xóa tài liệu
         async function confirmDelete() {
             if (!documentToDelete) return;
 
-            const confirmBtn = document.getElementById('confirmDeleteBtn');
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = 'Đang xóa...';
+            const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+            confirmDeleteBtn.disabled = true;
+            document.getElementById('deleteLoading').style.display = 'block';
 
             try {
                 const response = await fetch(`${API_BASE_URL}/documents/vector/${documentToDelete._id}`, {
@@ -1342,141 +1303,157 @@
                 if (response.ok) {
                     showManageResult(`✅ Xóa thành công tài liệu: ${documentToDelete.filename}`, 'success');
                     closeDeleteModal();
-                    loadDocuments(); // Reload the list
+                    loadDocuments();
                 } else {
                     throw new Error(result.detail || 'Failed to delete document');
                 }
             } catch (error) {
                 showManageResult(`❌ Lỗi khi xóa: ${error.message}`, 'error');
             } finally {
-                confirmBtn.disabled = false;
-                confirmBtn.textContent = 'Xóa';
+                document.getElementById('deleteLoading').style.display = 'none';
+                confirmDeleteBtn.disabled = false;
             }
         }
 
-        // Document info modal
-        function showDocumentInfo(docId) {
-            const doc = currentDocuments.find(d => d._id === docId);
-            if (!doc) return;
+        // Tải danh sách tài liệu
+        async function loadDocuments() {
+            const searchInput = document.getElementById('searchInput').value.toLowerCase();
+            const filterType = document.getElementById('filterType').value;
 
-            const details = `
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <h3 style="margin-bottom: 10px; color: #333;">📁 ${doc.filename}</h3>
-                    <p><strong>📋 ID:</strong> ${doc._id}</p>
-                    <p><strong>📂 Loại file:</strong> <span class="document-type ${doc.file_type}">${doc.file_type}</span></p>
-                    <p><strong>👤 Người upload:</strong> ${doc.uploaded_by}</p>
-                    <p><strong>🕒 Ngày tạo:</strong> ${formatDate(doc.createdAt)}</p>
-                    ${doc.url ? `<p><strong>📁 Đường dẫn:</strong> ${doc.url}</p>` : ''}
-                </div>
-                
-                ${doc.role ? `
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <h4 style="margin-bottom: 10px; color: #333;">🔐 Phân quyền</h4>
-                    ${doc.role.user && doc.role.user.length > 0 ? `
-                        <p><strong>👥 Users:</strong></p>
-                        <ul style="margin: 5px 0 10px 20px;">
-                            ${doc.role.user.map(user => `<li>${user}</li>`).join('')}
-                        </ul>
-                    ` : ''}
-                    ${doc.role.subject && doc.role.subject.length > 0 ? `
-                        <p><strong>📚 Subjects:</strong></p>
-                        <ul style="margin: 5px 0 10px 20px;">
-                            ${doc.role.subject.map(subject => `<li>${subject}</li>`).join('')}
-                        </ul>
-                    ` : ''}
-                </div>
-                ` : ''}
-            `;
+            document.getElementById('loading').style.display = 'block';
+            document.querySelectorAll('.document-card').forEach(card => card.remove());
 
-            document.getElementById('documentDetails').innerHTML = details;
-            document.getElementById('infoModal').style.display = 'block';
-        }
+            try {
+                const response = await fetch(`${API_BASE_URL}/documents/list?file_type=${filterType}&limit=100`);
+                if (!response.ok) throw new Error('Không thể tải danh sách tài liệu');
+                const data = await response.json();
+                const documents = data.documents;
 
-        function closeInfoModal() {
-            document.getElementById('infoModal').style.display = 'none';
-        }
+                const grid = document.querySelector('.documents-grid');
+                documents.forEach(doc => {
+                    if (doc.filename.toLowerCase().includes(searchInput) || doc.uploaded_by.toLowerCase().includes(searchInput)) {
+                        const card = document.createElement('div');
+                        card.className = 'document-card';
+                        card.innerHTML = `
+                            <div class="document-header">
+                                <div class="document-title">${doc.filename}</div>
+                                <div class="document-type ${doc.file_type}">${doc.file_type}</div>
+                            </div>
+                            <div class="document-info">
+                                <div>👤 Người upload: ${doc.uploaded_by}</div>
+                                <div>📅 Ngày tạo: ${new Date(doc.createdAt).toLocaleDateString('vi-VN')}</div>
+                            </div>
+                            <div class="document-roles">
+                                ${doc.role?.user.map(user => `<span class="role-tag">${user}</span>`).join('') || ''}
+                                ${doc.role?.subject.map(subject => `<span class="role-tag">${subject}</span>`).join('') || ''}
+                            </div>
+                            <div class="document-actions">
+                                <button class="info-btn" onclick="openInfoModal('${doc._id}')">ℹ️ Chi tiết</button>
+                                <button class="edit-btn" onclick="openUpdateModal('${doc._id}')">✏️ Sửa</button>
+                                <button class="delete-btn" onclick="openDeleteModal('${doc._id}', '${doc.filename}')">🗑️ Xóa</button>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    }
+                });
 
-        // Close modals when clicking outside
-        window.onclick = function (event) {
-            const deleteModal = document.getElementById('deleteModal');
-            const infoModal = document.getElementById('infoModal');
-
-            if (event.target === deleteModal) {
-                closeDeleteModal();
-            }
-            if (event.target === infoModal) {
-                closeInfoModal();
+                document.getElementById('statsTotal').textContent = data.total;
+                document.getElementById('statsShowing').textContent = data.showing;
+            } catch (error) {
+                showManageResult(`❌ Lỗi khi tải danh sách: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
             }
         }
 
-        // Show/hide loading state for upload
-        function showUploadLoadingState(isLoading) {
-            const loading = document.getElementById('uploadLoading');
-            const submitBtn = document.getElementById('submitBtn');
-            const result = document.getElementById('uploadResult');
-
-            if (isLoading) {
-                loading.style.display = 'block';
-                submitBtn.disabled = true;
-                submitBtn.textContent = 'Đang xử lý...';
-                result.style.display = 'none';
-            } else {
-                loading.style.display = 'none';
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Upload & Process';
-            }
-        }
-
-        // Reset upload form
-        function resetUploadForm() {
-            document.getElementById('uploadForm').reset();
-            fileLabel.textContent = 'Click để chọn file hoặc kéo thả file vào đây';
-            fileInfo.style.display = 'none';
-            document.getElementById('uploadResult').style.display = 'none';
-
-            // Reset multi-select counters
-            document.getElementById('userCount').textContent = 'Đã chọn: 0 người dùng';
-            document.getElementById('subjectCount').textContent = 'Đã chọn: 0 chủ đề';
-
-            document.getElementById('uploadForm').scrollIntoView({ behavior: 'smooth' });
-        }
-
-        // Show results
-        function showUploadResult(message, type) {
-            const resultDiv = document.getElementById('uploadResult');
-            resultDiv.innerHTML = message;
-            resultDiv.className = `result ${type}`;
-            resultDiv.style.display = 'block';
-
-            setTimeout(() => {
-                resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-        }
-
+        // Hiển thị kết quả
         function showManageResult(message, type) {
-            const resultDiv = document.getElementById('manageResult');
-            resultDiv.innerHTML = message;
-            resultDiv.className = `result ${type}`;
-            resultDiv.style.display = 'block';
-
-            setTimeout(() => {
-                resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-
-            // Auto hide after 5 seconds
-            setTimeout(() => {
-                resultDiv.style.display = 'none';
-            }, 5000);
+            const result = document.getElementById('manageResult');
+            result.textContent = message;
+            result.className = `result ${type}`;
+            result.style.display = 'block';
+            setTimeout(() => result.style.display = 'none', 5000);
         }
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function () {
-            // Check API status on load
-            checkApiStatus();
-            setInterval(checkApiStatus, 30000);
+        // Xử lý upload file
+        document.getElementById('file').addEventListener('change', function (e) {
+            const fileInfo = document.getElementById('fileInfo');
+            if (e.target.files.length > 0) {
+                fileInfo.textContent = `Đã chọn: ${e.target.files[0].name} (${(e.target.files[0].size / 1024).toFixed(2)} KB)`;
+                fileInfo.style.display = 'block';
+            } else {
+                fileInfo.style.display = 'none';
+            }
+        });
 
-            // Set initial filtered documents
-            filteredDocuments = currentDocuments;
+        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const roleUser = [];
+            document.querySelectorAll('#userSelect input[type="checkbox"]:checked').forEach(checkbox => roleUser.push(checkbox.value));
+            const roleSubject = [];
+            document.querySelectorAll('#subjectSelect input[type="checkbox"]:checked').forEach(checkbox => roleSubject.push(checkbox.value));
+            formData.append('role_user', JSON.stringify(roleUser));
+            formData.append('role_subject', JSON.stringify(roleSubject));
+
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/documents/vector/add`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showManageResult(`✅ Tải lên thành công: ${result.filename}`, 'success');
+                    this.reset();
+                    document.getElementById('fileInfo').style.display = 'none';
+                    loadDocuments();
+                } else {
+                    throw new Error(result.detail || 'Tải lên thất bại');
+                }
+            } catch (error) {
+                showManageResult(`❌ Lỗi khi tải lên: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+            }
+        });
+
+        // Khởi tạo khi trang tải
+        const API_BASE_URL = 'http://localhost:8000';
+        document.addEventListener('DOMContentLoaded', () => {
+            // Kiểm tra trạng thái API
+            fetch(`${API_BASE_URL}/health`)
+                .then(response => {
+                    document.getElementById('apiStatus').className = 'api-status ' + (response.ok ? 'online' : 'offline');
+                    document.getElementById('apiStatus').textContent = response.ok ? 'API Online' : 'API Offline';
+                })
+                .catch(() => {
+                    document.getElementById('apiStatus').className = 'api-status offline';
+                    document.getElementById('apiStatus').textContent = 'API Offline';
+                });
+
+            // Tải danh sách tài liệu
+            loadDocuments();
+
+            // Thêm sự kiện tìm kiếm và lọc
+            document.getElementById('searchInput').addEventListener('input', loadDocuments);
+            document.getElementById('filterType').addEventListener('change', loadDocuments);
+            document.getElementById('refreshBtn').addEventListener('click', loadDocuments);
+
+            // Cập nhật số lượng người dùng và chủ đề được chọn
+            ['userSelect', 'subjectSelect', 'updateUserSelect', 'updateSubjectSelect'].forEach(id => {
+                document.getElementById(id).addEventListener('change', () => {
+                    const count = document.querySelectorAll(`#${id} input[type="checkbox"]:checked`).length;
+                    const baseId = id.startsWith('update') ? id.replace('update', '') : id;
+                    document.getElementById(`${baseId === 'userSelect' || baseId === 'updateUserSelect' ? 'user' : 'subject'}Count`).textContent = `Đã chọn: ${count} ${baseId === 'userSelect' || baseId === 'updateUserSelect' ? 'người dùng' : 'chủ đề'}`;
+                });
+            });
         });
     </script>
 </body>

@@ -353,6 +353,342 @@ async def list_documents(file_type: str = None, limit: int = 100, skip: int = 0)
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
+# Thêm vào file main.py
+
+@app.put("/documents/vector/{doc_id}")
+async def update_vector_document(
+    doc_id: str,
+    filename: str = Form(None),
+    uploaded_by: str = Form(None),
+    file_type: str = Form(None),
+    role_user: str = Form(None),
+    role_subject: str = Form(None)
+):
+    """
+    API endpoint để cập nhật metadata của tài liệu.
+    
+    Args:
+        doc_id: ID của document cần cập nhật
+        filename: Tên file mới (optional) - sẽ rename file vật lý
+        uploaded_by: Người upload mới (optional)
+        file_type: Loại file mới (optional) - nếu thay đổi sẽ di chuyển file và vectorstore
+        role_user: JSON string chứa danh sách user roles mới (optional)
+        role_subject: JSON string chứa danh sách subject roles mới (optional)
+    
+    Returns:
+        dict: Thông tin cập nhật
+    """
+    try:
+        logger.info(f"Updating document with ID: {doc_id}")
+        
+        # 1. Tìm thông tin document hiện tại
+        current_doc = find_document_info(doc_id)
+        if not current_doc:
+            logger.error(f"Document not found: {doc_id}")
+            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
+        
+        # Lấy thông tin hiện tại
+        current_file_type = current_doc.get('file_type')
+        current_filename = current_doc.get('filename')
+        current_file_path = current_doc.get('url')
+        
+        # 2. Validate các input
+        # Validate filename nếu được cung cấp
+        if filename:
+            supported_extensions = {'.pdf', '.txt', '.docx', '.csv', '.xlsx', '.xls'}
+            file_extension = os.path.splitext(filename.lower())[1]
+            if file_extension not in supported_extensions:
+                logger.error(f"Unsupported file format: {file_extension}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File format {file_extension} not supported. Must be one of: {list(supported_extensions)}"
+                )
+        
+        # Validate file_type nếu được cung cấp
+        if file_type:
+            valid_file_types = ['public', 'student', 'teacher', 'admin']
+            if file_type not in valid_file_types:
+                logger.error(f"Invalid file_type: {file_type}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Invalid file_type. Must be one of: {valid_file_types}"
+                )
+        
+        # 3. Chuẩn bị metadata mới
+        new_filename = filename if filename else current_filename
+        new_file_type = file_type if file_type else current_file_type
+        new_uploaded_by = uploaded_by if uploaded_by else current_doc.get('uploaded_by')
+        
+        # Xử lý role
+        if role_user is not None or role_subject is not None:
+            try:
+                current_role = current_doc.get('role', {'user': [], 'subject': []})
+                new_role = {
+                    'user': json.loads(role_user) if role_user else current_role.get('user', []),
+                    'subject': json.loads(role_subject) if role_subject else current_role.get('subject', [])
+                }
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON format: {str(e)}")
+                raise HTTPException(status_code=400, detail="Invalid JSON format for role_user or role_subject")
+        else:
+            new_role = current_doc.get('role', {'user': [], 'subject': []})
+        
+        # 4. Xác định các thao tác cần thực hiện
+        filename_changed = filename and filename != current_filename
+        file_type_changed = file_type and file_type != current_file_type
+        
+        # 5. Thực hiện các thao tác file
+        final_file_path = current_file_path
+        operations = {
+            "file_renamed": False,
+            "file_moved": False,
+            "vector_moved": False
+        }
+        
+        try:
+            # Trường hợp 1: Chỉ đổi filename (không đổi file_type)
+            if filename_changed and not file_type_changed:
+                logger.info(f"Renaming file from {current_filename} to {new_filename}")
+                new_file_path, _ = get_file_paths(current_file_type, new_filename)
+                
+                if os.path.exists(current_file_path):
+                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+                    shutil.move(current_file_path, new_file_path)
+                    operations["file_renamed"] = True
+                    final_file_path = new_file_path
+                    logger.info(f"File renamed to: {new_file_path}")
+                else:
+                    logger.warning(f"Original file not found: {current_file_path}")
+                    final_file_path = new_file_path
+            
+            # Trường hợp 2: Chỉ đổi file_type (không đổi filename)
+            elif file_type_changed and not filename_changed:
+                logger.info(f"Moving file from {current_file_type} to {new_file_type}")
+                new_file_path, new_vector_db_path = get_file_paths(new_file_type, current_filename)
+                current_file_path_check, current_vector_db_path = get_file_paths(current_file_type, current_filename)
+                
+                # Di chuyển file
+                if os.path.exists(current_file_path):
+                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+                    shutil.move(current_file_path, new_file_path)
+                    operations["file_moved"] = True
+                    final_file_path = new_file_path
+                    logger.info(f"File moved to: {new_file_path}")
+                else:
+                    logger.warning(f"Original file not found: {current_file_path}")
+                    final_file_path = new_file_path
+                
+                # Xử lý vectorstore: xóa từ cũ và thêm vào mới
+                try:
+                    # Xóa document khỏi vector database cũ
+                    if delete_from_faiss_index(current_vector_db_path, doc_id):
+                        logger.info(f"Deleted document from old vector database: {current_vector_db_path}")
+                    
+                    # Tạo metadata object tạm thời để thêm vào vector database mới
+                    temp_metadata = AddVectorRequest(
+                        _id=doc_id,
+                        filename=current_filename,
+                        url=new_file_path,
+                        uploaded_by=new_uploaded_by,
+                        role=new_role,
+                        file_type=new_file_type,
+                        createdAt=current_doc.get('createdAt')
+                    )
+                    
+                    # Thêm document vào vector database mới
+                    add_to_embedding(new_file_path, temp_metadata)
+                    operations["vector_moved"] = True
+                    logger.info(f"Added document to new vector database: {new_vector_db_path}")
+                    
+                except Exception as e:
+                    logger.error(f"Error handling vector database: {str(e)}")
+                    # Không raise exception để không làm fail toàn bộ quá trình
+                    operations["vector_moved"] = False
+            
+            # Trường hợp 3: Đổi cả filename và file_type
+            elif filename_changed and file_type_changed:
+                logger.info(f"Changing both filename ({current_filename} -> {new_filename}) and file_type ({current_file_type} -> {new_file_type})")
+                
+                # Bước 1: Rename file trong thư mục hiện tại
+                temp_file_path, _ = get_file_paths(current_file_type, new_filename)
+                if os.path.exists(current_file_path):
+                    os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+                    shutil.move(current_file_path, temp_file_path)
+                    operations["file_renamed"] = True
+                    logger.info(f"File renamed to: {temp_file_path}")
+                else:
+                    logger.warning(f"Original file not found: {current_file_path}")
+                
+                # Bước 2: Di chuyển file đã rename sang thư mục mới
+                new_file_path, new_vector_db_path = get_file_paths(new_file_type, new_filename)
+                current_vector_db_path = get_file_paths(current_file_type, new_filename)[1]
+                
+                if os.path.exists(temp_file_path):
+                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+                    shutil.move(temp_file_path, new_file_path)
+                    operations["file_moved"] = True
+                    final_file_path = new_file_path
+                    logger.info(f"File moved to: {new_file_path}")
+                else:
+                    final_file_path = new_file_path
+                
+                # Xử lý vectorstore: xóa từ cũ và thêm vào mới
+                try:
+                    # Xóa document khỏi vector database cũ
+                    if delete_from_faiss_index(current_vector_db_path, doc_id):
+                        logger.info(f"Deleted document from old vector database: {current_vector_db_path}")
+                    
+                    # Tạo metadata object để thêm vào vector database mới
+                    temp_metadata = AddVectorRequest(
+                        _id=doc_id,
+                        filename=new_filename,
+                        url=new_file_path,
+                        uploaded_by=new_uploaded_by,
+                        role=new_role,
+                        file_type=new_file_type,
+                        createdAt=current_doc.get('createdAt')
+                    )
+                    
+                    # Thêm document vào vector database mới
+                    add_to_embedding(new_file_path, temp_metadata)
+                    operations["vector_moved"] = True
+                    logger.info(f"Added document to new vector database: {new_vector_db_path}")
+                    
+                except Exception as e:
+                    logger.error(f"Error handling vector database: {str(e)}")
+                    # Không raise exception để không làm fail toàn bộ quá trình
+                    operations["vector_moved"] = False
+            
+            # Trường hợp 4: Chỉ cập nhật metadata (không đổi file hoặc file_type)
+            else:
+                logger.info("Only updating metadata, no file operations needed")
+                final_file_path = current_file_path
+        
+        except Exception as e:
+            logger.error(f"Error during file operations: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error during file operations: {str(e)}")
+        
+        # 6. Cập nhật metadata
+        updated_metadata = AddVectorRequest(
+            _id=doc_id,
+            filename=new_filename,
+            url=final_file_path,
+            uploaded_by=new_uploaded_by,
+            role=new_role,
+            file_type=new_file_type,
+            createdAt=current_doc.get('createdAt')
+        )
+        
+        try:
+            # Xóa metadata cũ
+            delete_metadata(doc_id)
+            
+            # Lưu metadata mới
+            save_metadata(updated_metadata)
+            logger.info(f"Metadata updated for document: {doc_id}")
+        except Exception as e:
+            logger.error(f"Error updating metadata: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error updating metadata: {str(e)}")
+        
+        # 7. Trả về kết quả
+        response = {
+            "message": "Document updated successfully",
+            "_id": doc_id,
+            "updated_fields": {
+                "filename": new_filename,
+                "uploaded_by": new_uploaded_by,
+                "file_type": new_file_type,
+                "role": new_role
+            },
+            "file_operations": {
+                **operations,
+                "vector_operation_details": {
+                    "deleted_from": get_file_paths(current_file_type, current_filename)[1] if file_type_changed else None,
+                    "added_to": get_file_paths(new_file_type, new_filename)[1] if file_type_changed else None
+                }
+            },
+            "new_file_path": final_file_path,
+            "updatedAt": datetime.now(timezone(timedelta(hours=7))).isoformat()
+        }
+        
+        # Thêm thông tin về các thay đổi cụ thể
+        if filename_changed:
+            response["changes"] = response.get("changes", {})
+            response["changes"]["filename"] = {
+                "old": current_filename,
+                "new": new_filename
+            }
+        
+        if file_type_changed:
+            response["changes"] = response.get("changes", {})
+            response["changes"]["file_type"] = {
+                "old": current_file_type,
+                "new": new_file_type
+            }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error updating document {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error updating document: {str(e)}")
+
+
+@app.get("/documents/vector/{doc_id}")
+async def get_vector_document(doc_id: str):
+    """
+    API endpoint để lấy thông tin chi tiết của một document.
+    
+    Args:
+        doc_id: ID của document cần lấy thông tin
+    
+    Returns:
+        dict: Thông tin chi tiết của document
+    """
+    try:
+        logger.info(f"Getting document info for ID: {doc_id}")
+        
+        # Tìm thông tin document
+        doc_info = find_document_info(doc_id)
+        if not doc_info:
+            logger.error(f"Document not found: {doc_id}")
+            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
+        
+        # Kiểm tra file có tồn tại không
+        file_path = doc_info.get('url')
+        file_exists = os.path.exists(file_path) if file_path else False
+        
+        # Kiểm tra vector database có tồn tại không
+        try:
+            _, vector_db_path = get_file_paths(doc_info.get('file_type'), doc_info.get('filename'))
+            vector_exists = (os.path.exists(f"{vector_db_path}/index.faiss") and 
+                           os.path.exists(f"{vector_db_path}/index.pkl"))
+        except ValueError:
+            vector_exists = False
+        
+        # Thêm thông tin về file size nếu file tồn tại
+        file_size = None
+        if file_exists:
+            try:
+                file_size = os.path.getsize(file_path)
+            except Exception as e:
+                logger.warning(f"Could not get file size: {str(e)}")
+        
+        response = {
+            **doc_info,
+            "file_exists": file_exists,
+            "vector_exists": vector_exists,
+            "file_size": file_size
+        }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error getting document {doc_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
