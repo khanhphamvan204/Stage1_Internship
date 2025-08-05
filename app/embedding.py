@@ -50,6 +50,26 @@ class AddVectorRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True  # Cho phép sử dụng cả field name và alias
 
+class VectorSearchRequest(BaseModel):
+    query: str = Field(..., description="Câu truy vấn tìm kiếm")
+    k: int = Field(default=5, ge=1, le=100, description="Số lượng kết quả trả về (1-100)")
+    file_type: str = Field(..., description="Loại tài liệu (public, student, teacher, admin)")
+    similarity_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Ngưỡng độ tương quan (0.0-1.0)")
+
+# Định nghĩa model cho response
+class SearchResult(BaseModel):
+    content: str
+    metadata: dict
+
+class VectorSearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult]
+    total_found: int
+    k_requested: int
+    file_type: str
+    similarity_threshold: float
+    search_time_ms: float
+
 def get_file_paths(file_type: str, filename: str) -> tuple[str, str]:
     """
     Trả về đường dẫn file và vector database dựa trên file_type

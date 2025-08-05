@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from app.embedding import add_to_embedding, delete_from_faiss_index, delete_metadata, find_document_info, save_metadata, AddVectorRequest, get_file_paths, smart_metadata_update
+from app.embedding import SearchResult, VectorSearchRequest, VectorSearchResponse, add_to_embedding, delete_from_faiss_index, delete_metadata, find_document_info, save_metadata, AddVectorRequest, get_file_paths, smart_metadata_update
 from app.config import Config
 import shutil
 from pymongo import MongoClient
@@ -50,19 +50,12 @@ async def health_check():
 async def add_vector_document(
     file: UploadFile = File(...),
     uploaded_by: str = Form(...),
-    file_type: str = Form(...),  # Thêm trường file_type bắt buộc
+    file_type: str = Form(...),
     role_user: str = Form(default="[]"),
     role_subject: str = Form(default="[]")
 ):
     """
     API endpoint để thêm tài liệu, lưu metadata và embedding vào FAISS.
-    
-    Args:
-        file: File upload
-        uploaded_by: Người upload
-        file_type: Loại file ('public', 'student', 'teacher', 'admin')
-        role_user: JSON string chứa danh sách user roles
-        role_subject: JSON string chứa danh sách subject roles
     """
     try:
         logger.info(f"Processing file: {file.filename}, uploaded_by: {uploaded_by}, file_type: {file_type}")
@@ -106,12 +99,12 @@ async def add_vector_document(
 
         # Tạo metadata object với _id được map thành id field
         metadata = AddVectorRequest(
-            _id=generated_id,  # Sử dụng _id như alias
+            _id=generated_id,
             filename=file_name,
             url=file_url,
             uploaded_by=uploaded_by,
             role=role,
-            file_type=file_type,  # Thêm file_type vào metadata
+            file_type=file_type,
             createdAt=created_at
         )
 
@@ -189,14 +182,10 @@ async def get_file_types():
             }
         ]
     }
+
 @app.delete("/documents/vector/{doc_id}")
 async def delete_vector_document(doc_id: str):
-    """
-    API endpoint để xóa tài liệu, bao gồm file, vector DB và metadata.
-    
-    Args:
-        doc_id: ID của document cần xóa
-    """
+    """API endpoint để xóa tài liệu, bao gồm file, vector DB và metadata."""
     try:
         logger.info(f"Deleting document with ID: {doc_id}")
         
@@ -280,14 +269,7 @@ async def delete_vector_document(doc_id: str):
 
 @app.get("/documents/list")
 async def list_documents(file_type: str = None, limit: int = 100, skip: int = 0):
-    """
-    API endpoint để lấy danh sách tài liệu.
-    
-    Args:
-        file_type: Lọc theo loại file (optional)
-        limit: Số lượng documents trả về (default: 100)
-        skip: Số lượng documents bỏ qua (default: 0)
-    """
+    """API endpoint để lấy danh sách tài liệu."""
     try:
         documents = []
         
@@ -356,460 +338,10 @@ async def list_documents(file_type: str = None, limit: int = 100, skip: int = 0)
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error retrieving documents: {str(e)}")
-# Thêm vào file main.py
-
-@app.put("/documents/vector/{doc_id}")
-async def update_vector_document(
-    doc_id: str,
-    filename: str = Form(None),
-    uploaded_by: str = Form(None),
-    file_type: str = Form(None),
-    role_user: str = Form(None),
-    role_subject: str = Form(None),
-    force_re_embed: bool = Form(False)  # Tham số mới để buộc re-embed
-):
-    """
-    API endpoint để cập nhật metadata của tài liệu với xử lý thông minh cho vector embeddings.
-    
-    Args:
-        doc_id: ID của document cần cập nhật
-        filename: Tên file mới (optional) - sẽ rename file vật lý
-        uploaded_by: Người upload mới (optional)
-        file_type: Loại file mới (optional) - nếu thay đổi sẽ di chuyển file và vectorstore
-        role_user: JSON string chứa danh sách user roles mới (optional)
-        role_subject: JSON string chứa danh sách subject roles mới (optional)
-        force_re_embed: Buộc re-embed toàn bộ document (default: False)
-    
-    Returns:
-        dict: Thông tin cập nhật
-    """
-    try:
-        logger.info(f"Updating document with ID: {doc_id}")
-        
-        # 1. Tìm thông tin document hiện tại
-        current_doc = find_document_info(doc_id)
-        if not current_doc:
-            logger.error(f"Document not found: {doc_id}")
-            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
-        
-        # Lấy thông tin hiện tại
-        old_metadata = current_doc.copy()  # Backup metadata cũ
-        current_file_type = current_doc.get('file_type')
-        current_filename = current_doc.get('filename')
-        current_file_path = current_doc.get('url')
-        
-        # 2. Validate các input
-        # Validate filename nếu được cung cấp
-        if filename:
-            supported_extensions = {'.pdf', '.txt', '.docx', '.csv', '.xlsx', '.xls'}
-            file_extension = os.path.splitext(filename.lower())[1]
-            if file_extension not in supported_extensions:
-                logger.error(f"Unsupported file format: {file_extension}")
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"File format {file_extension} not supported. Must be one of: {list(supported_extensions)}"
-                )
-        
-        # Validate file_type nếu được cung cấp
-        if file_type:
-            valid_file_types = ['public', 'student', 'teacher', 'admin']
-            if file_type not in valid_file_types:
-                logger.error(f"Invalid file_type: {file_type}")
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Invalid file_type. Must be one of: {valid_file_types}"
-                )
-        
-        # 3. Chuẩn bị metadata mới
-        new_filename = filename if filename else current_filename
-        new_file_type = file_type if file_type else current_file_type
-        new_uploaded_by = uploaded_by if uploaded_by else current_doc.get('uploaded_by')
-        
-        # Xử lý role
-        if role_user is not None or role_subject is not None:
-            try:
-                current_role = current_doc.get('role', {'user': [], 'subject': []})
-                new_role = {
-                    'user': json.loads(role_user) if role_user else current_role.get('user', []),
-                    'subject': json.loads(role_subject) if role_subject else current_role.get('subject', [])
-                }
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON format: {str(e)}")
-                raise HTTPException(status_code=400, detail="Invalid JSON format for role_user or role_subject")
-        else:
-            new_role = current_doc.get('role', {'user': [], 'subject': []})
-        
-        # 4. Xác định các thao tác cần thực hiện
-        filename_changed = filename and filename != current_filename
-        file_type_changed = file_type and file_type != current_file_type
-        metadata_only_changed = not filename_changed and not file_type_changed
-        
-        # 5. Thực hiện các thao tác file và cập nhật metadata
-        final_file_path = current_file_path
-        operations = {
-            "file_renamed": False,
-            "file_moved": False,
-            "vector_updated": False,
-            "metadata_updated": False,
-            "update_method": "none"
-        }
-        
-        try:
-            # Trường hợp 1: Chỉ đổi filename (không đổi file_type)
-            if filename_changed and not file_type_changed:
-                logger.info(f"Renaming file from {current_filename} to {new_filename}")
-                new_file_path, _ = get_file_paths(current_file_type, new_filename)
-                
-                if os.path.exists(current_file_path):
-                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-                    shutil.move(current_file_path, new_file_path)
-                    operations["file_renamed"] = True
-                    final_file_path = new_file_path
-                    logger.info(f"File renamed to: {new_file_path}")
-                else:
-                    logger.warning(f"Original file not found: {current_file_path}")
-                    final_file_path = new_file_path
-            
-            # Trường hợp 2: Chỉ đổi file_type (không đổi filename)
-            elif file_type_changed and not filename_changed:
-                logger.info(f"Moving file from {current_file_type} to {new_file_type}")
-                new_file_path, new_vector_db_path = get_file_paths(new_file_type, current_filename)
-                
-                # Di chuyển file
-                if os.path.exists(current_file_path):
-                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-                    shutil.move(current_file_path, new_file_path)
-                    operations["file_moved"] = True
-                    final_file_path = new_file_path
-                    logger.info(f"File moved to: {new_file_path}")
-                else:
-                    logger.warning(f"Original file not found: {current_file_path}")
-                    final_file_path = new_file_path
-            
-            # Trường hợp 3: Đổi cả filename và file_type
-            elif filename_changed and file_type_changed:
-                logger.info(f"Changing both filename ({current_filename} -> {new_filename}) and file_type ({current_file_type} -> {new_file_type})")
-                
-                # Bước 1: Rename file trong thư mục hiện tại
-                temp_file_path, _ = get_file_paths(current_file_type, new_filename)
-                if os.path.exists(current_file_path):
-                    os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
-                    shutil.move(current_file_path, temp_file_path)
-                    operations["file_renamed"] = True
-                    logger.info(f"File renamed to: {temp_file_path}")
-                else:
-                    logger.warning(f"Original file not found: {current_file_path}")
-                
-                # Bước 2: Di chuyển file đã rename sang thư mục mới
-                new_file_path, new_vector_db_path = get_file_paths(new_file_type, new_filename)
-                
-                if os.path.exists(temp_file_path):
-                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-                    shutil.move(temp_file_path, new_file_path)
-                    operations["file_moved"] = True
-                    final_file_path = new_file_path
-                    logger.info(f"File moved to: {new_file_path}")
-                else:
-                    final_file_path = new_file_path
-            
-            # Trường hợp 4: Chỉ cập nhật metadata (không đổi file hoặc file_type)
-            else:
-                logger.info("Only updating metadata, no file operations needed")
-                final_file_path = current_file_path
-        
-        except Exception as e:
-            logger.error(f"Error during file operations: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error during file operations: {str(e)}")
-        
-        # 6. Tạo metadata mới
-        new_metadata = AddVectorRequest(
-            _id=doc_id,
-            filename=new_filename,
-            url=final_file_path,
-            uploaded_by=new_uploaded_by,
-            role=new_role,
-            file_type=new_file_type,
-            createdAt=current_doc.get('createdAt')
-        )
-        
-        # 7. Cập nhật vector embeddings và metadata một cách thông minh
-        try:
-            # Sử dụng smart_metadata_update để xử lý vector embeddings
-            vector_update_success = smart_metadata_update(
-                doc_id=doc_id,
-                old_metadata=old_metadata,
-                new_metadata=new_metadata,
-                force_re_embed=force_re_embed
-            )
-            
-            if vector_update_success:
-                operations["vector_updated"] = True
-                if filename_changed or file_type_changed or force_re_embed:
-                    operations["update_method"] = "full_re_embed"
-                else:
-                    operations["update_method"] = "metadata_only"
-                logger.info(f"Vector embeddings updated successfully using method: {operations['update_method']}")
-            else:
-                logger.warning(f"Vector embeddings update failed for document: {doc_id}")
-                operations["update_method"] = "failed"
-            
-            # Cập nhật metadata trong database
-            try:
-                # Xóa metadata cũ
-                delete_metadata(doc_id)
-                
-                # Lưu metadata mới
-                save_metadata(new_metadata)
-                operations["metadata_updated"] = True
-                logger.info(f"Metadata updated successfully for document: {doc_id}")
-            except Exception as e:
-                logger.error(f"Error updating metadata in database: {str(e)}")
-                operations["metadata_updated"] = False
-                # Không raise exception để không làm fail toàn bộ quá trình
-            
-        except Exception as e:
-            logger.error(f"Error updating vector embeddings: {str(e)}")
-            operations["vector_updated"] = False
-            operations["update_method"] = "failed"
-            # Vẫn tiếp tục cập nhật metadata trong database
-            try:
-                delete_metadata(doc_id)
-                save_metadata(new_metadata)
-                operations["metadata_updated"] = True
-            except Exception as meta_e:
-                logger.error(f"Error updating metadata after vector failure: {str(meta_e)}")
-                operations["metadata_updated"] = False
-        
-        # 8. Tạo response với thông tin chi tiết
-        response = {
-            "message": "Document update completed",
-            "_id": doc_id,
-            "success": operations["vector_updated"] and operations["metadata_updated"],
-            "updated_fields": {
-                "filename": {
-                    "old": current_filename,
-                    "new": new_filename,
-                    "changed": filename_changed
-                },
-                "uploaded_by": {
-                    "old": current_doc.get('uploaded_by'),
-                    "new": new_uploaded_by,
-                    "changed": new_uploaded_by != current_doc.get('uploaded_by')
-                },
-                "file_type": {
-                    "old": current_file_type,
-                    "new": new_file_type,
-                    "changed": file_type_changed
-                },
-                "role": {
-                    "old": current_doc.get('role'),
-                    "new": new_role,
-                    "changed": new_role != current_doc.get('role')
-                }
-            },
-            "operations": operations,
-            "paths": {
-                "old_file_path": current_file_path,
-                "new_file_path": final_file_path,
-                "old_vector_db": get_file_paths(current_file_type, current_filename)[1] if current_file_type and current_filename else None,
-                "new_vector_db": get_file_paths(new_file_type, new_filename)[1] if new_file_type and new_filename else None
-            },
-            "updatedAt": datetime.now(timezone(timedelta(hours=7))).isoformat(),
-            "force_re_embed": force_re_embed
-        }
-        
-        # Thêm cảnh báo nếu có lỗi một phần
-        if not operations["vector_updated"]:
-            response["warnings"] = response.get("warnings", [])
-            response["warnings"].append("Vector embeddings update failed - document search may be affected")
-        
-        if not operations["metadata_updated"]:
-            response["warnings"] = response.get("warnings", [])
-            response["warnings"].append("Metadata database update failed")
-        
-        # Đặt status code phù hợp
-        if operations["vector_updated"] and operations["metadata_updated"]:
-            response["message"] = "Document updated successfully"
-            status_code = 200
-        elif operations["vector_updated"] or operations["metadata_updated"]:
-            response["message"] = "Document partially updated - some operations failed"
-            status_code = 207  # Multi-Status
-        else:
-            response["message"] = "Document update failed"
-            status_code = 500
-            raise HTTPException(status_code=status_code, detail=response)
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error updating document {doc_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error updating document: {str(e)}")
-
-
-# Thêm endpoint mới để kiểm tra trạng thái vector embeddings
-@app.get("/documents/vector/{doc_id}/embedding-status")
-async def check_embedding_status(doc_id: str):
-    """
-    API endpoint để kiểm tra trạng thái embedding của document.
-    
-    Args:
-        doc_id: ID của document cần kiểm tra
-    
-    Returns:
-        dict: Thông tin về trạng thái embedding
-    """
-    try:
-        logger.info(f"Checking embedding status for document: {doc_id}")
-        
-        # Tìm thông tin document
-        doc_info = find_document_info(doc_id)
-        if not doc_info:
-            logger.error(f"Document not found: {doc_id}")
-            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
-        
-        file_type = doc_info.get('file_type')
-        filename = doc_info.get('filename')
-        
-        if not file_type or not filename:
-            raise HTTPException(status_code=400, detail="Missing file_type or filename in document metadata")
-        
-        # Lấy đường dẫn vector database
-        try:
-            _, vector_db_path = get_file_paths(file_type, filename)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        
-        # Kiểm tra sự tồn tại của vector database
-        index_exists = (os.path.exists(f"{vector_db_path}/index.faiss") and 
-                       os.path.exists(f"{vector_db_path}/index.pkl"))
-        
-        chunks_count = 0
-        embedding_info = {}
-        
-        if index_exists:
-            try:
-                # Tải FAISS index để kiểm tra số lượng chunks
-                embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-                db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
-                
-                # Đếm số chunks của document này
-                docstore = db.docstore
-                index_to_docstore_id = db.index_to_docstore_id
-                
-                for index, docstore_id in index_to_docstore_id.items():
-                    doc = docstore.search(docstore_id)
-                    if doc and doc.metadata.get('_id') == doc_id:
-                        chunks_count += 1
-                
-                embedding_info = {
-                    "total_vectors": len(index_to_docstore_id),
-                    "document_chunks": chunks_count,
-                    "vector_db_size": {
-                        "index_faiss": os.path.getsize(f"{vector_db_path}/index.faiss") if os.path.exists(f"{vector_db_path}/index.faiss") else 0,
-                        "index_pkl": os.path.getsize(f"{vector_db_path}/index.pkl") if os.path.exists(f"{vector_db_path}/index.pkl") else 0
-                    }
-                }
-                
-            except Exception as e:
-                logger.error(f"Error analyzing vector database: {str(e)}")
-                embedding_info = {"error": f"Failed to analyze vector database: {str(e)}"}
-        
-        response = {
-            "document_id": doc_id,
-            "file_type": file_type,
-            "filename": filename,
-            "vector_db_path": vector_db_path,
-            "embedding_exists": index_exists,
-            "chunks_count": chunks_count,
-            "embedding_info": embedding_info,
-            "status": "embedded" if index_exists and chunks_count > 0 else "not_embedded",
-            "checked_at": datetime.now(timezone(timedelta(hours=7))).isoformat()
-        }
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error checking embedding status for {doc_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error checking embedding status: {str(e)}")
-
-
-# Thêm endpoint để force re-embed document
-@app.post("/documents/vector/{doc_id}/re-embed")
-async def force_re_embed_document(doc_id: str):
-    """
-    API endpoint để buộc re-embed document.
-    
-    Args:
-        doc_id: ID của document cần re-embed
-    
-    Returns:
-        dict: Kết quả re-embedding
-    """
-    try:
-        logger.info(f"Force re-embedding document: {doc_id}")
-        
-        # Tìm thông tin document
-        doc_info = find_document_info(doc_id)
-        if not doc_info:
-            logger.error(f"Document not found: {doc_id}")
-            raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
-        
-        # Tạo metadata object
-        metadata = AddVectorRequest(
-            _id=doc_id,
-            filename=doc_info.get('filename'),
-            url=doc_info.get('url'),
-            uploaded_by=doc_info.get('uploaded_by'),
-            role=doc_info.get('role', {'user': [], 'subject': []}),
-            file_type=doc_info.get('file_type'),
-            createdAt=doc_info.get('createdAt')
-        )
-        
-        # Xóa embeddings cũ
-        file_type = doc_info.get('file_type')
-        filename = doc_info.get('filename')
-        _, vector_db_path = get_file_paths(file_type, filename)
-        
-        delete_success = delete_from_faiss_index(vector_db_path, doc_id)
-        
-        # Thêm embeddings mới
-        file_path = doc_info.get('url')
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-        
-        add_to_embedding(file_path, metadata)
-        
-        return {
-            "message": "Document re-embedded successfully",
-            "document_id": doc_id,
-            "file_path": file_path,
-            "vector_db_path": vector_db_path,
-            "old_embeddings_deleted": delete_success,
-            "re_embedded_at": datetime.now(timezone(timedelta(hours=7))).isoformat()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error re-embedding document {doc_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error re-embedding document: {str(e)}")
-
 
 @app.get("/documents/vector/{doc_id}")
 async def get_vector_document(doc_id: str):
-    """
-    API endpoint để lấy thông tin chi tiết của một document.
-    
-    Args:
-        doc_id: ID của document cần lấy thông tin
-    
-    Returns:
-        dict: Thông tin chi tiết của document
-    """
+    """API endpoint để lấy thông tin chi tiết của một document."""
     try:
         logger.info(f"Getting document info for ID: {doc_id}")
         
@@ -853,6 +385,76 @@ async def get_vector_document(doc_id: str):
     except Exception as e:
         logger.error(f"Unexpected error getting document {doc_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
+
+# SIMPLIFIED SEARCH ENDPOINT - Không có score
+@app.post("/documents/vector/search", response_model=VectorSearchResponse)
+async def search_vector_documents(request: VectorSearchRequest):
+    """
+    Optimized vector search WITHOUT similarity scores - fast and simple.
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        logger.info(f"Search: query='{request.query}', k={request.k}, file_type={request.file_type}")
+        
+        # Validation
+        valid_file_types = ['public', 'student', 'teacher', 'admin']
+        if request.file_type not in valid_file_types:
+            raise HTTPException(status_code=400, detail=f"Invalid file_type. Must be one of: {valid_file_types}")
+        
+        _, vector_db_path = get_file_paths(request.file_type, "dummy_filename")
+        
+        # Kiểm tra vector database có tồn tại không
+        if not (os.path.exists(f"{vector_db_path}/index.faiss") and os.path.exists(f"{vector_db_path}/index.pkl")):
+            return VectorSearchResponse(
+                query=request.query, 
+                results=[], 
+                total_found=0, 
+                k_requested=request.k,
+                file_type=request.file_type, 
+                similarity_threshold=request.similarity_threshold, 
+                search_time_ms=0.0
+            )
+        
+        # Load database
+        embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
+        
+        # SIMPLE SEARCH - Không cần threshold, chỉ lấy top k results
+        search_docs = db.similarity_search(
+            query=request.query,
+            k=request.k
+        )
+        
+        # Convert to simple results
+        results = [
+            SearchResult(
+                content=doc.page_content,
+                metadata=doc.metadata
+            )
+            for doc in search_docs
+        ]
+        
+        search_time_ms = round((time.time() - start_time) * 1000, 2)
+        
+        response = VectorSearchResponse(
+            query=request.query,
+            results=results,
+            total_found=len(results),
+            k_requested=request.k,
+            file_type=request.file_type,
+            similarity_threshold=request.similarity_threshold,
+            search_time_ms=search_time_ms
+        )
+        
+        logger.info(f"Search completed in {search_time_ms}ms, returned {len(results)} results")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error in search: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error in search: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
