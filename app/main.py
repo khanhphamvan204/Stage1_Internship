@@ -54,7 +54,7 @@ def retrieve_with_title_filter(query, title_filter, k=5):
 
     # Tạo bộ lọc metadata để lọc theo title
     def metadata_filter(metadata_dict):
-        return title_filter.lower() in metadata_dict.get("title", "").lower()
+        return title_filter.lower() in metadata_dict.get("uploaded_by", "").lower()
 
     # Thực hiện truy vấn với bộ lọc
     try:
@@ -72,13 +72,13 @@ def retrieve_with_title_filter(query, title_filter, k=5):
 # Ví dụ sử dụng
 if __name__ == "__main__":
     query = "Thông tin"
-    title_filter = "Thông tin"  # Thay bằng title bạn muốn lọc
+    title_filter = "1323"  # Thay bằng title bạn muốn lọc
     results = retrieve_with_title_filter(query, title_filter, k=5)
     
     # In kết quả
     for i, result in enumerate(results):
         print(f"Kết quả {i+1}:")
-        print(f"Title: {result['metadata']['title']}")
+        print(f"Title: {result['metadata']['uploaded_by']}")
         print(f"Content: {result['content'][:200]}...")  # In 200 ký tự đầu tiên
         print(f"Metadata: {result['metadata']}")
         print("-" * 50)

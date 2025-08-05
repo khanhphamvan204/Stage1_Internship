@@ -260,6 +260,152 @@ def add_to_embedding(file_path: str, metadata: AddVectorRequest):
         logger.error(f"Error processing FAISS index: {str(e)}")
         raise
 
+def update_document_metadata_in_vector_store(doc_id: str, old_metadata: dict, new_metadata: AddVectorRequest) -> bool:
+    """
+    Cập nhật metadata của document trong FAISS vector store.
+    Cách tiếp cận: Xóa tất cả chunks cũ và thêm lại với metadata mới.
+    
+    Args:
+        doc_id: ID của document cần cập nhật
+        old_metadata: Metadata cũ
+        new_metadata: Metadata mới
+    
+    Returns:
+        bool: True nếu thành công, False nếu thất bại
+    """
+    try:
+        logger.info(f"Updating metadata in vector store for document: {doc_id}")
+        
+        # Lấy đường dẫn vector database từ old_metadata
+        old_file_type = old_metadata.get('file_type')
+        old_filename = old_metadata.get('filename')
+        
+        if not old_file_type or not old_filename:
+            logger.error(f"Missing file_type or filename in old_metadata for doc_id: {doc_id}")
+            return False
+        
+        _, old_vector_db_path = get_file_paths(old_file_type, old_filename)
+        
+        # Kiểm tra sự tồn tại của vector database cũ
+        if not (os.path.exists(f"{old_vector_db_path}/index.faiss") and 
+                os.path.exists(f"{old_vector_db_path}/index.pkl")):
+            logger.warning(f"Old vector database not found at {old_vector_db_path}")
+            return False
+        
+        # 1. Xóa document cũ khỏi vector database cũ
+        success = delete_from_faiss_index(old_vector_db_path, doc_id)
+        if not success:
+            logger.error(f"Failed to delete old document from vector database")
+            return False
+        
+        # 2. Thêm document với metadata mới vào vector database mới
+        file_path = new_metadata.url
+        if os.path.exists(file_path):
+            add_to_embedding(file_path, new_metadata)
+            logger.info(f"Successfully updated metadata in vector store for document: {doc_id}")
+            return True
+        else:
+            logger.error(f"File not found for re-embedding: {file_path}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error updating metadata in vector store: {str(e)}")
+        return False
+
+def update_metadata_only(doc_id: str, new_metadata: AddVectorRequest) -> bool:
+    """
+    Cập nhật chỉ metadata trong các vector chunks hiện có mà không thay đổi embeddings.
+    Phương pháp này nhanh hơn nhưng yêu cầu truy cập trực tiếp vào docstore.
+    
+    Args:
+        doc_id: ID của document cần cập nhật
+        new_metadata: Metadata mới
+    
+    Returns:
+        bool: True nếu thành công, False nếu thất bại
+    """
+    try:
+        logger.info(f"Updating metadata only for document: {doc_id}")
+        
+        # Lấy vector database path
+        _, vector_db_path = get_file_paths(new_metadata.file_type, new_metadata.filename)
+        
+        # Kiểm tra sự tồn tại của vector database
+        if not (os.path.exists(f"{vector_db_path}/index.faiss") and 
+                os.path.exists(f"{vector_db_path}/index.pkl")):
+            logger.warning(f"Vector database not found at {vector_db_path}")
+            return False
+        
+        # Tải FAISS index
+        embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        db = FAISS.load_local(vector_db_path, embedding_model, allow_dangerous_deserialization=True)
+        
+        # Tìm và cập nhật metadata cho tất cả chunks của document
+        docstore = db.docstore
+        index_to_docstore_id = db.index_to_docstore_id
+        updated_count = 0
+        new_metadata_dict = new_metadata.dict(by_alias=True)
+        
+        for index, docstore_id in index_to_docstore_id.items():
+            doc = docstore.search(docstore_id)
+            if doc and doc.metadata.get('_id') == doc_id:
+                # Cập nhật metadata
+                doc.metadata = new_metadata_dict
+                docstore.add({docstore_id: doc})
+                updated_count += 1
+        
+        if updated_count > 0:
+            # Lưu lại FAISS index với metadata đã cập nhật
+            db.save_local(vector_db_path)
+            logger.info(f"Successfully updated metadata for {updated_count} chunks of document: {doc_id}")
+            return True
+        else:
+            logger.warning(f"No chunks found for document: {doc_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error updating metadata only: {str(e)}")
+        return False
+
+def smart_metadata_update(doc_id: str, old_metadata: dict, new_metadata: AddVectorRequest, 
+                         force_re_embed: bool = False) -> bool:
+    """
+    Cập nhật metadata thông minh: chọn phương pháp tối ưu dựa trên loại thay đổi.
+    
+    Args:
+        doc_id: ID của document
+        old_metadata: Metadata cũ
+        new_metadata: Metadata mới
+        force_re_embed: Buộc re-embed toàn bộ document
+    
+    Returns:
+        bool: True nếu thành công
+    """
+    try:
+        # Kiểm tra loại thay đổi
+        file_type_changed = old_metadata.get('file_type') != new_metadata.file_type
+        filename_changed = old_metadata.get('filename') != new_metadata.filename
+        
+        # Nếu file_type hoặc filename thay đổi, hoặc force_re_embed = True -> re-embed toàn bộ
+        if file_type_changed or filename_changed or force_re_embed:
+            logger.info(f"File type or filename changed, performing full re-embedding for doc_id: {doc_id}")
+            return update_document_metadata_in_vector_store(doc_id, old_metadata, new_metadata)
+        else:
+            # Chỉ thay đổi metadata đơn giản (uploaded_by, role) -> cập nhật metadata only
+            logger.info(f"Only metadata changed, performing metadata-only update for doc_id: {doc_id}")
+            success = update_metadata_only(doc_id, new_metadata)
+            
+            # Nếu metadata-only update thất bại, fallback sang full re-embed
+            if not success:
+                logger.warning(f"Metadata-only update failed, falling back to full re-embedding")
+                return update_document_metadata_in_vector_store(doc_id, old_metadata, new_metadata)
+            
+            return success
+            
+    except Exception as e:
+        logger.error(f"Error in smart metadata update: {str(e)}")
+        return False
+
 def delete_metadata(doc_id: str) -> bool:
     """Xóa metadata từ MongoDB và metadata.json fallback."""
     success = False
